@@ -440,6 +440,109 @@ await check('v1.1：F08 でもどの月・どの行事でも選べる（月と�
   await page.click('#clear');
 });
 
+
+// ---------------------------------------------------------------- v1.2 Canva
+await check('v1.2：出力先の初期値は「通常のAI向け」で、Canva向けに切り替えると専用の依頼文になる', async () => {
+  await page.goto(`${ORIGIN}/#/f/F05`);
+  await clearIfAny();
+  assert(await page.isChecked('#F05-target-0'), '初期値が通常のAI向けでない');
+  await fillForm(getTask('F05'), minimalValues(getTask('F05')));
+  await page.click('#generate');
+  const general = await page.inputValue('#prompt-output');
+  assert(general.includes('【目的】'), '通常AI向けの依頼文でない');
+  await page.fill('#prompt-output', '通常版を手で編集した文章');
+  assert(await page.isVisible('#wrap-F05-delivery'), '通常AI向けで仕上がりの使い方が出ない');
+  // Canva へ切り替え
+  await page.click('label[for="F05-target-1"]');
+  assert(await page.isHidden('#wrap-F05-delivery'), 'Canva向けで重複項目が隠れない');
+  assert((await page.textContent('#generate')) === 'Canva AI向けの依頼文を作る', 'ボタン表示が変わらない');
+  assert(await page.isVisible('#mode-switch-note'), '切り替え後の案内がない');
+  assert(!(await page.$('#prompt-output')), '切り替えただけで、もう一方の依頼文が表示されている');
+  await page.click('#generate');
+  const cv = await page.inputValue('#prompt-output');
+  assert(cv.includes('紙面デザインを作成してください') && cv.includes('■ 掲載する内容') && !cv.includes('【'), cv.slice(0, 200));
+  assert((await page.getAttribute('#prompt-output', 'data-mode')) === 'canva');
+  assert((await page.textContent('#canva-howto')).includes('Canva AIの入力欄に貼り付けてください'), '操作説明がない');
+  // コピー
+  await page.click('.output-toolbar .btn-copy');
+  const clip = await readClipboard();
+  assert(clip === cv, 'Canva向けの依頼文がコピーされない');
+  const notes = await page.$$eval('#canva-notes li', (els) => els.map((e) => e.textContent));
+  assert(notes.length >= 2 && notes.every((n) => !clip.includes(n)), '注意事項がコピー対象に混ざっている');
+  // Canvaを開く
+  const link = await page.$('#open-canva');
+  assert((await link.getAttribute('href')) === 'https://www.canva.com/', 'リンク先が違う');
+  assert((await link.getAttribute('target')) === '_blank' && (await link.getAttribute('rel')).includes('noopener'), 'リンク属性が不足');
+  await noHorizontalOverflow('Canva出力');
+  await page.screenshot({ path: join(OUT, 'v12-F05-canva.png'), fullPage: true });
+  // 通常へ戻すと、手で編集した通常版がそのまま残っている
+  await page.click('label[for="F05-target-0"]');
+  assert((await page.inputValue('#prompt-output')) === '通常版を手で編集した文章', '通常版の手動編集が消えた');
+  assert(await page.isVisible('.edited-note'), '編集済みの表示が消えた');
+  await page.click('label[for="F05-target-1"]');
+  assert((await page.inputValue('#prompt-output')) === cv, 'Canva版が保持されていない');
+  await page.click('label[for="F05-target-0"]');
+});
+
+await check('v1.2：「Canvaを開く」は依頼文を含まないトップページを新しいタブで開く（スマホ）', async () => {
+  await page.click('label[for="F05-target-1"]');
+  // 実際には Canva へ接続しない（遷移先のURLだけを記録して中止する）
+  const opened = [];
+  await context.route('https://www.canva.com/**', (r) => { opened.push(r.request().url()); r.abort(); });
+  const [popup] = await Promise.all([page.waitForEvent('popup'), page.tap('#open-canva')]);
+  for (let i = 0; i < 30 && !opened.length; i += 1) await page.waitForTimeout(100);
+  assert(opened[0] === 'https://www.canva.com/', `開いたURL: ${opened.join(', ')}`);
+  await popup.close();
+  await context.unroute('https://www.canva.com/**');
+  await page.tap('.output-toolbar .btn-copy');
+  assert((await readClipboard()).includes('紙面デザインを作成してください'), 'タップでコピーできない');
+  await page.click('label[for="F05-target-0"]');
+});
+
+await check('v1.2：F06 はお知らせ文書のときだけ Canva を選べ、メールでは通常のAI向けになる', async () => {
+  await page.goto(`${ORIGIN}/#/f/F06`);
+  await clearIfAny();
+  assert(await page.isVisible('#wrap-F06-target'), '文書形式で出力先が出ない');
+  await page.click('label[for="F06-target-1"]');
+  assert(await page.isHidden('#wrap-F06-delivery') && await page.isHidden('#wrap-F06-variants'), 'Canva向けで重複項目が隠れない');
+  await page.selectOption('#F06-purpose', '行事の案内');
+  await page.fill('#F06-facts', '11月8日（金）に校外学習を行います。');
+  await page.click('#generate');
+  assert((await page.inputValue('#prompt-output')).includes('お知らせ文書のデザインを作成してください'), 'F06のCanva依頼文でない');
+  await page.click('label[for="F06-medium-1"]');
+  assert(await page.isHidden('#wrap-F06-target'), 'メールで出力先が出る');
+  assert(await page.isVisible('#wrap-F06-delivery'), 'メールで仕上がりの使い方が隠れたまま');
+  assert(!(await page.$('#open-canva')), 'メールでCanvaの操作が出る');
+  assert((await page.textContent('#generate')) === '依頼文を作る');
+  await page.click('#generate');
+  const s = await page.inputValue('#prompt-output');
+  assert(s.includes('【目的】') && s.includes('メール'), 'メールで通常AI向けにならない');
+  await page.click('label[for="F06-medium-0"]');
+});
+
+await check('v1.2：F08 の「使うソフト」と矛盾しない（Canva向けでは隠し、戻すと元の値）', async () => {
+  await page.goto(`${ORIGIN}/#/f/F08`);
+  await clearIfAny();
+  await page.selectOption('#F08-tool', 'PowerPoint');
+  await page.click('label[for="F08-target-1"]');
+  assert(await page.isHidden('#wrap-F08-tool'), 'Canva向けで使うソフトが出る');
+  await page.click('label[for="F08-target-0"]');
+  assert((await page.inputValue('#F08-tool')) === 'PowerPoint', '使うソフトの値が消えた');
+});
+
+await check('v1.2：F07 の Canva 向けは画像生成の指示になる', async () => {
+  await page.goto(`${ORIGIN}/#/f/F07`);
+  await clearIfAny();
+  await page.selectOption('#F07-use', 'プリント・ワークシート');
+  await page.fill('#F07-subject', 'どんぐりと落ち葉');
+  await page.click('label[for="F07-target-1"]');
+  assert(await page.isHidden('#wrap-F07-altPrompt'), 'Canva向けで重複項目が出る');
+  await page.click('#generate');
+  const s = await page.inputValue('#prompt-output');
+  assert(s.startsWith('教材用のイラスト画像を1枚生成してください。') && s.includes('主題：どんぐりと落ち葉'), s.slice(0, 100));
+  await page.click('label[for="F07-target-0"]');
+});
+
 await check('タップ領域：主要ボタン・選択肢は高さ44px以上', async () => {
   await page.goto(`${ORIGIN}/#/f/F05`);
   for (const p of ['time', 'events', 'season', 'design']) await openPanel('F05', p);
@@ -449,6 +552,20 @@ await check('タップ領域：主要ボタン・選択肢は高さ44px以上', 
     .map((e) => ({ t: (e.textContent || e.id || e.tagName).trim().slice(0, 20), h: e.getBoundingClientRect().height }))
     .filter((x) => x.h < 43.5));
   assert(small.length === 0, JSON.stringify(small));
+});
+
+await check('v1.2：Canva向け出力のボタン・リンクも高さ44px以上', async () => {
+  await page.goto(`${ORIGIN}/#/f/F05`);
+  await clearIfAny();
+  await fillForm(getTask('F05'), minimalValues(getTask('F05')));
+  await page.click('label[for="F05-target-1"]');
+  await page.click('#generate');
+  const small = await page.$$eval('#output button, #output a, #wrap-F05-target .chip-text', (els) => els
+    .filter((e) => e.offsetParent !== null)
+    .map((e) => ({ t: e.textContent.trim().slice(0, 20), h: e.getBoundingClientRect().height }))
+    .filter((x) => x.h < 43.5));
+  assert(small.length === 0, JSON.stringify(small));
+  await page.click('label[for="F05-target-0"]');
 });
 
 await check('フォーム部品にラベルが対応している', async () => {

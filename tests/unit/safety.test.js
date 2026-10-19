@@ -107,11 +107,12 @@ test('配信ファイルに外部通信・保存のコードがない', () => {
   }
 });
 
-test('外部リソースを読み込まない（外部リンクは文科省ページのみ）', () => {
+test('外部リソースを読み込まない（外部リンクは文科省ページとCanvaのトップのみ）', () => {
   for (const file of shipped) {
     const src = readFileSync(file, 'utf8');
     const urls = src.match(/https?:\/\/[^\s'"`)<]+/g) || [];
-    for (const u of urls) assert.equal(u, 'https://www.mext.go.jp/a_menu/other/mext_02412.html', `${file}: ${u}`);
+    const allowed = ['https://www.mext.go.jp/a_menu/other/mext_02412.html', 'https://www.canva.com/'];
+    for (const u of urls) assert.ok(allowed.includes(u), `${file}: ${u}`);
   }
   const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
   assert.match(html, /connect-src 'none'/);

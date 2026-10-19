@@ -90,6 +90,21 @@ const designField = (hint) => ({
   hint,
 });
 
+// ---- v1.2：出力先（通常のAI／Canva AI）----
+// 初期値は必ず「通常のAI向け」。hideInCanva の項目は Canva 向けのときだけ隠す（値は消さない）。
+
+export const CANVA_TASK_IDS = ['F05', 'F06', 'F07', 'F08'];
+
+const targetField = (overrides = {}) => ({
+  id: 'target', label: '依頼文の出力先', type: 'radio', group: 'output', default: 'general',
+  options: [
+    { value: 'general', label: '通常のAI向け', hint: 'ChatGPT・Claude・Geminiなど' },
+    { value: 'canva', label: 'Canva AI向け', hint: 'デザインを作成' },
+  ],
+  hint: 'Canva AI向けは、Canvaに貼り付けてデザインそのものを作ってもらうための依頼文です。入力した内容はそのまま使われます。',
+  ...overrides,
+});
+
 export const TASKS = [
   // ---------------------------------------------------------------- F01
   {
@@ -305,12 +320,13 @@ export const TASKS = [
           { value: 'concise', label: '敬体で簡潔に' },
           { value: 'friendly', label: '親しみやすく（読者が児童生徒中心）' },
         ] },
+      targetField(),
       paperField('A4縦', { options: PAPER_PRINT.filter((p) => ['A4縦', 'A4横', 'B4縦', 'B4横', 'B5縦'].includes(p.value)) }),
       { id: 'pages', label: '枚数', type: 'radio', group: 'output', default: '1枚', options: ['1枚', '2枚（表裏）'] },
       { id: 'photoSlots', label: '写真・イラストを後から入れる枠', type: 'select', group: 'output', default: '0',
         options: [{ value: '0', label: 'なし' }, { value: '1', label: '1つ' }, { value: '2', label: '2つ' }, { value: '3', label: '3つ' }, { value: '4', label: '4つ' }] },
       monoField(true),
-      deliveryField(DELIVERY_DOC, 'word'),
+      deliveryField(DELIVERY_DOC, 'word', { hideInCanva: true }),
       ...timeFields(),
       { id: 'season', label: '時期の補足', type: 'text', group: 'extra', panel: 'time', placeholder: '例：2学期の後半、雪の多い地域', maxLength: 40 },
       eventsField(['prep', 'before', 'after', 'motif']),
@@ -359,15 +375,16 @@ export const TASKS = [
           { value: 'more-polite', label: 'より丁寧（おわびを含むなど）' },
           { value: 'concise', label: '簡潔に' },
         ] },
+      targetField({ showIf: { field: 'medium', in: ['letter'] }, hint: 'Canva AI向けは「お知らせ文書（紙・配信）」のときだけ選べます。メール・連絡アプリは通常のAI向けです。' }),
       { id: 'length', label: '分量', type: 'radio', group: 'output', default: 'standard',
         options: [
           { value: 'short', label: '短め' },
           { value: 'standard', label: '標準' },
           { value: 'long', label: '詳しめ' },
         ] },
-      { id: 'variants', label: '文案の数', type: 'radio', group: 'output', default: '1案', options: ['1案', '2案（雰囲気違い）'] },
+      { id: 'variants', label: '文案の数', type: 'radio', group: 'output', default: '1案', options: ['1案', '2案（雰囲気違い）'], hideInCanva: { field: 'medium', in: ['letter'] } },
       { id: 'easyJapanese', label: 'やさしい日本語版も作る', type: 'check', group: 'output', default: false },
-      deliveryField(DELIVERY_PLAIN, 'text'),
+      deliveryField(DELIVERY_PLAIN, 'text', { hideInCanva: { field: 'medium', in: ['letter'] } }),
       ...timeFields(),
       eventsField(['prep', 'before', 'after']),
       { id: 'seasonReflect', label: '季節の表現', type: 'radio', group: 'extra', panel: 'time', options: SEASON_REFLECT_OPTIONS.letter, default: '',
@@ -428,8 +445,9 @@ export const TASKS = [
       { id: 'printSize', label: '掲載する大きさ', type: 'select', group: 'advanced', default: '',
         options: [{ value: '', label: '指定しない' }, '紙面に小さく配置', '紙面の4分の1程度', '紙面の半分程度', '全面・大きく'] },
       { id: 'avoid', label: '避けたいもの', type: 'textarea', group: 'advanced', placeholder: '例：怖い表情、細かすぎる装飾', maxLength: 200 },
+      targetField(),
       { id: 'variants', label: '出してほしい案の数', type: 'radio', group: 'output', default: '1案', options: ['1案', '2案', '4案'] },
-      { id: 'altPrompt', label: '画像を作れないAIなら、画像生成AI用の指示文（日本語・英語）を書いてもらう', type: 'check', group: 'output', default: true },
+      { id: 'altPrompt', label: '画像を作れないAIなら、画像生成AI用の指示文（日本語・英語）を書いてもらう', type: 'check', group: 'output', default: true, hideInCanva: true },
       ...timeFields(),
       eventsField(null, { hint: '選んだ行事は、イラストのモチーフとして使います。' }),
       ...motifFields('image'),
@@ -475,7 +493,8 @@ export const TASKS = [
       { id: 'colors', label: '使いたい色', type: 'text', group: 'advanced', placeholder: '例：紺と黄色、学年カラーの緑', maxLength: 60 },
       { id: 'imageSlots', label: '写真・イラストを後から入れる枠', type: 'select', group: 'advanced', default: '0',
         options: [{ value: '0', label: 'なし' }, { value: '1', label: '1つ' }, { value: '2', label: '2つ' }, { value: '3', label: '3つ' }] },
-      { id: 'tool', label: '作るときに使うソフト', type: 'select', group: 'output', default: '',
+      targetField(),
+      { id: 'tool', label: '作るときに使うソフト', type: 'select', group: 'output', default: '', hideInCanva: true,
         options: [{ value: '', label: '指定しない' }, 'PowerPoint', 'Googleスライド', 'Canva', 'Word', 'Googleドキュメント', 'Keynote'] },
       monoField(false),
       ...timeFields(),

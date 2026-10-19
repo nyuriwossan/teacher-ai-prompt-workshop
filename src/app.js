@@ -12,6 +12,7 @@ import {
   TASKS, CATEGORIES, POPULAR_TASK_IDS, EXTRA_PANELS, getTask, categoryLabel,
 } from './data/taskCatalog.js';
 import { getDesignStyle } from './data/designStyles.js';
+import { buildCanvaPrompt, isCanvaMode, CANVA_URL } from './prompts/canvaPrompt.js';
 import { searchTasks, searchGuides } from './data/search.js';
 import {
   buildPrompt, validate, getDefaults, getFields, isVisible, cleanValues, usesReference,
@@ -72,7 +73,7 @@ function taskRow(task) {
       h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
 }
 
-function copyButton(getText, label = '全文をコピー', cls = 'btn btn-primary btn-copy', fallbackEl = null) {
+function copyButton(getText, label = '全文をコピー', cls = 'btn btn-primary btn-copy', fallbackEl = null, doneMessage = 'コピーしました。利用が認められたAIに貼り付けてください。') {
   const btn = h('button', { type: 'button', class: cls }, label);
   btn.addEventListener('click', async () => {
     const text = getText();
@@ -81,7 +82,7 @@ function copyButton(getText, label = '全文をコピー', cls = 'btn btn-primar
     if (ok) {
       btn.textContent = 'コピーしました ✓';
       btn.classList.add('is-done');
-      toast('コピーしました。利用が認められたAIに貼り付けてください。');
+      toast(doneMessage);
       setTimeout(() => { btn.textContent = label; btn.classList.remove('is-done'); }, 2200);
     } else {
       toast('自動でコピーできませんでした。テキストを長押しして選択し、コピーしてください。', 'error');
@@ -223,6 +224,9 @@ function renderTask(task) {
 
   const fieldEls = new Map();
   let attempted = false;
+  // v1.2：出力先（通常のAI／Canva AI）ごとに依頼文を別々に保持する
+  const modeOf = () => (isCanvaMode(task, values) ? 'canva' : 'general');
+  const outKey = (mode = modeOf()) => `${task.id}:${mode}`;
 
   const onChange = (changedId) => {
     // 表示条件の更新
@@ -235,8 +239,10 @@ function renderTask(task) {
     }
     updatePanelSummaries();
     if (attempted) refreshErrors(false);
-    if (state.outputs.has(task.id)) markStale();
-    void changedId;
+    if (changedId === 'target' || changedId === 'medium') {
+      updateGenerateLabel();
+      drawOutput(false);
+    } else if (state.outputs.has(outKey())) markStale();
   };
 
   const errorSummary = h('div', { class: 'error-summary', role: 'alert', hidden: true, tabindex: '-1', id: 'error-summary' });
@@ -282,6 +288,9 @@ function renderTask(task) {
   let sectionNo = 1;
   const nextNo = () => String(sectionNo++);
 
+  const generateBtn = h('button', { type: 'submit', class: 'btn btn-primary btn-large', id: 'generate' }, '依頼文を作る');
+  const updateGenerateLabel = () => { generateBtn.textContent = modeOf() === 'canva' ? 'Canva AI向けの依頼文を作る' : '依頼文を作る'; };
+
   const form = h('form', { class: 'task-form', novalidate: true, id: `form-${task.id}` },
     errorSummary,
     h('section', { class: 'form-section' },
@@ -308,7 +317,7 @@ function renderTask(task) {
       h('h2', { class: 'form-section-title' }, h('span', { class: 'num' }, nextNo()), '出力の設定'),
       makeFieldBlock(groups.output)),
     h('div', { class: 'form-actions' },
-      h('button', { type: 'submit', class: 'btn btn-primary btn-large', id: 'generate' }, '依頼文を作る'),
+      generateBtn,
       h('p', { class: 'hint center' }, 'この工房はAIを呼び出しません。依頼文を作るだけです。')),
   );
 
@@ -328,16 +337,30 @@ function renderTask(task) {
   const markStale = () => { if (staleNote) staleNote.hidden = false; };
 
   const generate = (scroll) => {
-    const result = buildPrompt(task, values);
+    const mode = modeOf();
+    const result = mode === 'canva' ? buildCanvaPrompt(task, values) : buildPrompt(task, values);
     if (!result.ok) return;
-    state.outputs.set(task.id, { text: result.text, edited: false });
+    state.outputs.set(outKey(mode), { text: result.text, edited: false, notes: result.notes || [] });
     drawOutput(scroll);
   };
 
   const drawOutput = (scroll) => {
-    const out = state.outputs.get(task.id);
+    const mode = modeOf();
+    const isCanva = mode === 'canva';
+    const out = state.outputs.get(outKey(mode));
     clear(output);
-    if (!out) { output.hidden = true; return; }
+    output.dataset.mode = mode;
+    if (!out) {
+      const other = state.outputs.get(outKey(isCanva ? 'general' : 'canva'));
+      if (!other) { output.hidden = true; return; }
+      // もう一方の出力先の依頼文は表示しない（切り替えると戻る）
+      output.hidden = false;
+      add(output,
+        h('h2', { class: 'output-title', id: 'output-title', tabindex: '-1' }, isCanva ? '出力先：Canva AI向け' : '出力先：通常のAI向け'),
+        h('p', { class: 'notice notice-info', id: 'mode-switch-note' },
+          `${isCanva ? 'Canva AI向け' : '通常のAI向け'}の依頼文はまだ作っていません。「${isCanva ? 'Canva AI向けの依頼文を作る' : '依頼文を作る'}」を押してください。${isCanva ? '通常のAI向け' : 'Canva AI向け'}の依頼文は、出力先を戻すと表示されます。`));
+      return;
+    }
     output.hidden = false;
     const cleaned = cleanValues(task, values);
     const textFields = fields.filter((f) => ['text', 'textarea', 'articles'].includes(f.type));
@@ -345,7 +368,8 @@ function renderTask(task) {
 
     const area = h('textarea', {
       id: 'prompt-output', class: 'input textarea prompt-output', rows: '14', spellcheck: 'false',
-      'aria-label': '生成した依頼文（編集できます）', 'aria-describedby': 'output-help',
+      'aria-label': isCanva ? '生成したCanva AI向けの依頼文（編集できます）' : '生成した依頼文（編集できます）', 'aria-describedby': 'output-help',
+      dataset: { mode },
     });
     area.value = out.text;
     const count = h('span', { class: 'char-count', id: 'char-count' }, `${out.text.length.toLocaleString()}字`);
@@ -372,8 +396,15 @@ function renderTask(task) {
     const clearBtn = h('button', { type: 'button', class: 'btn btn-danger-ghost', id: 'clear' }, '入力をクリア');
     clearBtn.addEventListener('click', () => clearTask(task));
 
-    add(output, 
-      h('h2', { class: 'output-title', id: 'output-title', tabindex: '-1' }, 'AIへの依頼文ができました'),
+    const copyLabel = isCanva ? '依頼文をコピー' : '全文をコピー';
+    const copyDone = isCanva ? 'コピーしました。Canva AIの入力欄に貼り付けてください。' : undefined;
+    const canvaLink = () => h('a', {
+      class: 'btn btn-secondary btn-canva', href: CANVA_URL, target: '_blank', rel: 'noopener noreferrer', id: 'open-canva',
+    }, 'Canvaを開く');
+
+    add(output,
+      h('h2', { class: 'output-title', id: 'output-title', tabindex: '-1' }, isCanva ? 'Canva AIへの依頼文ができました' : 'AIへの依頼文ができました'),
+      isCanva ? h('p', { class: 'canva-howto', id: 'canva-howto' }, '依頼文をコピーして、Canva AIの入力欄に貼り付けてください。生成されたデザインは必要に応じて修正してください。') : null,
       scan.found
         ? h('div', { class: 'notice notice-warn', role: 'status', id: 'pii-warning' },
           h('p', { class: 'notice-title' }, '個人情報などが含まれている可能性があります'),
@@ -392,14 +423,25 @@ function renderTask(task) {
             : '安全・引率・実施の可否などは、AIの答えではなく学校の規程と管理職の判断に従ってください。'))
         : null,
       staleNote,
-      h('div', { class: 'output-toolbar' }, copyButton(() => area.value, '全文をコピー', 'btn btn-primary btn-copy btn-large', area), count),
+      h('div', { class: 'output-toolbar' }, copyButton(() => area.value, copyLabel, 'btn btn-primary btn-copy btn-large', area, copyDone), count),
       h('p', { class: 'hint', id: 'output-help' }, '内容はここで直接直せます。'),
       area,
       editedNote,
-      h('div', { class: 'output-actions' },
-        copyButton(() => area.value, '全文をコピー', 'btn btn-primary btn-copy', area),
-        regen, clearBtn),
-      h('div', { class: 'card next-steps' },
+      isCanva
+        ? h('div', { class: 'output-actions output-actions-canva' },
+          copyButton(() => area.value, copyLabel, 'btn btn-primary btn-copy', area, copyDone),
+          canvaLink(),
+          regen, clearBtn)
+        : h('div', { class: 'output-actions' },
+          copyButton(() => area.value, copyLabel, 'btn btn-primary btn-copy', area, copyDone),
+          regen, clearBtn),
+      isCanva
+        ? h('div', { class: 'card next-steps canva-notes', id: 'canva-notes' },
+          h('h3', { class: 'sub-title' }, '使う前に確認すること'),
+          h('p', { class: 'small muted' }, 'この確認事項はコピーされません。'),
+          h('ul', { class: 'plain-list' }, (out.notes || []).map((n) => h('li', {}, n))))
+        : null,
+      isCanva ? null : h('div', { class: 'card next-steps' },
         h('h3', { class: 'sub-title' }, '次にすること'),
         h('ol', { class: 'plain-list numbered' },
           h('li', {}, '貼り付ける前に、児童生徒・保護者の名前や個別の事情が入っていないか、もう一度確認します。'),
@@ -430,7 +472,8 @@ function renderTask(task) {
   );
 
   updatePanelSummaries();
-  if (state.outputs.has(task.id)) drawOutput(false);
+  updateGenerateLabel();
+  drawOutput(false);
 }
 
 function panelSummary(panel, v) {
@@ -453,7 +496,8 @@ function panelHasValue(panel, v) {
 function clearTask(task) {
   if (!window.confirm('この用途で入力した内容と、作った依頼文を消去します。よろしいですか？')) return;
   state.values.delete(task.id);
-  state.outputs.delete(task.id);
+  state.outputs.delete(`${task.id}:general`);
+  state.outputs.delete(`${task.id}:canva`);
   render();
   toast('入力内容を消去しました。');
 }

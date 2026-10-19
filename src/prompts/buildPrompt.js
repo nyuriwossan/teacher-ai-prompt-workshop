@@ -53,11 +53,22 @@ export function getDefaults(task) {
   return values;
 }
 
+function matchCond(cond, values) {
+  const cur = values[cond.field];
+  if (Array.isArray(cur)) return cur.some((x) => cond.in.includes(x));
+  return cond.in.includes(cur);
+}
+
+/** Canva 向けが選ばれているか（gate があれば、その条件も満たすときだけ） */
+export function canvaSelected(values, gate = true) {
+  if (!values || values.target !== 'canva') return false;
+  return gate === true ? true : matchCond(gate, values);
+}
+
 export function isVisible(field, values) {
+  if (field.hideInCanva && canvaSelected(values, field.hideInCanva)) return false;
   if (!field.showIf) return true;
-  const cur = values[field.showIf.field];
-  if (Array.isArray(cur)) return cur.some((x) => field.showIf.in.includes(x));
-  return field.showIf.in.includes(cur);
+  return matchCond(field.showIf, values);
 }
 
 // ---------- サニタイズ ----------
