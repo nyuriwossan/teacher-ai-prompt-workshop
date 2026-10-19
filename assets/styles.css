@@ -357,3 +357,51 @@ main.container { padding-bottom: 48px; outline: none; }
   .site-header, .site-footer, .task-form, .output-actions, .output-toolbar, .next-steps, .crumb { display: none !important; }
   .output { border: 0; box-shadow: none; }
 }
+
+/* ---------- v1.1：時期・学校行事・季節モチーフ・デザインテイスト ---------- */
+
+.extra-section .hint { margin-top: 0; }
+.panel { border: 1px solid var(--border); border-radius: var(--radius-sm); margin: 10px 0 0; background: var(--surface); }
+.panel[open] { border-color: var(--border-strong); }
+.panel-title {
+  display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 6px 14px; cursor: pointer; list-style: none; font-weight: 700;
+}
+.panel-title::-webkit-details-marker { display: none; }
+.panel-title::after { content: "＋"; color: var(--primary); font-size: 18px; margin-left: 4px; }
+.panel[open] > .panel-title::after { content: "－"; }
+.panel-label { flex: none; }
+.panel-summary { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--muted); text-align: right; }
+.panel-body { padding: 0 14px 14px; border-top: 1px solid var(--border); }
+.panel-body > .field:first-child { margin-top: 12px; }
+
+.ev-selected { display: grid; gap: 10px; margin: 4px 0 6px; }
+.ev-selected-title { margin-bottom: 0; }
+.ev-item { border: 1px solid var(--info-border); background: var(--info-bg); border-radius: var(--radius-sm); padding: 6px 12px 12px; }
+.ev-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; }
+.ev-item-name { font-weight: 700; color: var(--primary-hover); }
+.ev-preview-row { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+.ev-preview { font-weight: 700; color: var(--text); }
+.ev-empty { margin: 4px 0; }
+.ev-status { min-height: 1.2em; margin: 0; }
+.ev-finder { margin-top: 8px; }
+.ev-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0; }
+.ev-tab { min-height: 44px; font-size: 13.5px; padding: 6px 12px; border-radius: 8px; }
+.ev-pool-box { border-top: 1px dashed var(--border); padding-top: 10px; }
+.ev-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ev-chip {
+  display: inline-flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 0;
+  min-height: 44px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text); font: inherit; font-size: 14.5px; line-height: 1.35; cursor: pointer; text-align: left;
+}
+.ev-chip[aria-pressed="true"] { background: var(--primary-weak); border-color: var(--primary); color: var(--primary-hover); font-weight: 700; box-shadow: inset 0 0 0 1px var(--primary); }
+.ev-chip[aria-pressed="true"] > span:first-child::before { content: "✓ "; }
+.ev-via { font-size: 11px; color: var(--muted); font-weight: 400; }
+.ev-custom { margin-top: 12px; }
+.ev-custom-row { display: flex; gap: 8px; }
+.ev-custom-row .input { flex: 1; min-width: 0; }
+.ev-add { flex: none; min-width: 72px; }
+
+.motif-rec { background: var(--warn-bg); border: 1px dashed var(--warn-border); border-radius: var(--radius-sm); padding: 4px 10px 10px; margin: 6px 0 4px; }
+.motif-rec .sublabel { color: #6b4d0f; }
+.motif-group { margin-top: 8px; }
+.motif-group .chip-text { font-size: 14px; padding: 6px 12px; }

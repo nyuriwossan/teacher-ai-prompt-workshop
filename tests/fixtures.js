@@ -72,6 +72,13 @@ function fillField(f, v, full = false, taskId = '') {
     case 'check':
       if (full) v[f.id] = true;
       break;
+    case 'events':
+      if (full) v[f.id] = [{ key: 'sports-02', base: '体育祭', custom: '', stage: f.stages ? f.stages[f.stages.length - 1] : '' }];
+      else v[f.id] = [];
+      break;
+    case 'motifs':
+      v[f.id] = full ? ['紅葉'] : [];
+      break;
     case 'select':
     case 'radio':
       if (!v[f.id]) v[f.id] = (opts.find((o) => o.value) || {}).value;

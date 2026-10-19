@@ -3,6 +3,8 @@
 // 共通の注意事項・教師確認の導入文は buildPrompt.js が加える。
 // 同じ本文を使い回さず、用途ごとの要件を具体的に書くこと。
 
+import { timeLine, eventsSection, motifLine, designLine, seasonalCautions } from './seasonal.js';
+
 // ---------- 共通の部品 ----------
 
 function deliveryLine(value, kind = 'doc') {
@@ -318,10 +320,12 @@ const F05 = {
         { h: '条件・入力情報', items: [
           v.title ? `通信のタイトル：「${v.title}」` : 'タイトル：通信名の案を3つ提案し、原稿では「（通信名）」としてください。',
           c.kv('時期・季節', v.season),
+          timeLine(v, 'doc'),
           `記事の数：${articles.length}本`,
           ...articleLines,
           c.kv('家庭への連絡・お願い', v.notices),
         ] },
+        eventsSection(v, 'doc'),
         { h: '出力形式', items: [
           `用紙：${v.paper || 'A4縦'}・${pagesLabel}に収まる分量とレイアウトにしてください。`,
           `本文の分量の目安：全体でおよそ${total}字以内${articles.length > 1 ? `（各記事${per}字以内）` : ''}。用紙に収まることを優先し、内容メモが短い場合は字数を埋めるために出来事を付け足さず、短いままでかまいません。`,
@@ -331,7 +335,13 @@ const F05 = {
             ? `写真・イラストを後から入れる枠を${photos}か所設けてください。本文中の入れる位置に【写真枠1：（入れる写真の内容の目安）／横長・紙面の約4分の1】のように、番号・内容の目安・大きさを書いてください。写真に写っている様子を推測で描写しないでください。`
             : '写真・イラストの枠は不要です。',
           c.has(v.notices) ? '家庭への連絡・お願いは、記事とは分けて最後に囲み枠で示してください。' : null,
+          (v.events || []).some((e) => e.stage !== 'motif')
+            ? '「学校行事」に挙げた行事（モチーフのみのものを除く）は、内容が重なる記事があればその記事の中で扱い、なければ記事を追加してください。追加した記事で入力がない部分は記入欄にしてください。'
+            : null,
           toneLine,
+          designLine(v, { mono: v.mono, subject: '紙面のデザイン' }),
+          v.designStyle ? '文章の文体は上の文体の指定に従い、デザインのテイストに合わせて文体を変えないでください。' : null,
+          motifLine(v, 'doc'),
           monoLine(v.mono),
           c.std('段組み・囲み・見出しの装飾などのレイアウトの指定は、原稿とは別に短く添えてください。'),
           deliveryLine(v.delivery),
@@ -340,9 +350,11 @@ const F05 = {
           '入力にない学校名・学級名・日付・行事名・児童生徒の名前・エピソードは創作しないでください。',
           '個々の児童生徒が特定できる書き方（名前、目立つ特徴、個別のできごと）をせず、学級・学年全体の姿として書いてください。',
           c.std('一部の児童生徒だけを取り上げたり、比べたりする表現は避けてください。'),
+          ...seasonalCautions(v),
         ] },
         { h: '教師が確認する点', items: [
           '日付・行事名・持ち物などの事実が正しいか',
+          c.has(v.events) ? '行事の名称（学校での名称）と、扱い方（事前・振り返りなど）が意図どおりか' : null,
           '個人が特定できる表現が含まれていないか',
           photos > 0 ? '写真を載せる場合、学校の方針（掲載の同意など）に沿っているか' : null,
           c.std('発行前に学年主任・管理職の確認が必要か'),
@@ -369,6 +381,10 @@ const F06 = {
       concise: '丁寧さを保ちつつ、要点が一目で分かる簡潔な文にしてください。',
     }[v.tone] || '保護者に向けた丁寧な敬語にしてください。';
     const twoVariants = String(v.variants).startsWith('2');
+    // 時候のあいさつ：季節の表現の指定があるときは、時期の行（timeLine）に任せる
+    const greetingLine = v.seasonReflect === 'none'
+      ? (v.month ? null : '時候のあいさつや季節の表現は入れないでください。')
+      : (v.seasonReflect === 'text' && v.month ? null : c.std('前文の時候のあいさつは短く一文程度にしてください。'));
 
     return {
       role: 'あなたは学校から保護者への連絡文を作る、文書作成のアシスタントです。',
@@ -382,7 +398,9 @@ const F06 = {
           c.kv('伝える事実', v.facts),
           c.kv('保護者にお願いしたいこと', v.requests),
           v.contact ? c.kv('問い合わせ先の書き方', v.contact) : '問い合わせ先は「（問い合わせ先）」の記入欄にしてください。',
+          timeLine({ ...v, seasonReflect: isMail ? '' : v.seasonReflect }, 'letter'),
         ] },
+        eventsSection(v, 'letter'),
         { h: '出力形式', items: isMail
           ? [
             '件名と本文を分けて示してください。件名は内容と必要な対応が分かる30字以内にしてください。',
@@ -399,7 +417,7 @@ const F06 = {
             c.has(v.requests) ? '提出物や回答が必要な場合は、切り取り線と返信欄の案をつけてください。' : null,
             lengthLine,
             toneLine,
-            c.std('前文の時候のあいさつは短く一文程度にしてください。'),
+            greetingLine,
             twoVariants ? '文面は、雰囲気の異なる2案（標準・やわらかめ）を示してください。' : null,
             v.easyJapanese ? 'あわせて、日本語を学んでいる保護者向けの「やさしい日本語版」も作成してください（一文を短く、日時・持ち物は箇条書きで）。' : null,
             deliveryLine(v.delivery),
@@ -409,6 +427,7 @@ const F06 = {
           '日付と曜日の組み合わせなど、事実の中に矛盾や不足があれば、文案とは別に指摘してください。',
           '保護者を責める、命令するような表現は避けてください。',
           v.audience === 'individual' ? '欠席・成績・トラブル・家庭の事情など、個別の事情に踏み込んだ内容は書かないでください。' : null,
+          c.has(v.events) || v.month ? '季節の飾りや行事にちなんだ装飾的な表現は、必要以上に加えないでください。' : null,
         ] },
         { h: '教師が確認する点', items: [
           '日時・曜日・場所・持ち物・期限が正しいか',
@@ -462,7 +481,12 @@ const F07 = {
           c.kv('色・印刷条件', colorLine),
           sizeLine,
           textLine,
+          timeLine(v, 'image'),
+          motifLine(v, 'image'),
+          designLine(v, { mono: v.color === 'mono' || v.color === 'lineart', subject: 'イラスト全体' }),
+          v.designStyle ? `絵柄（${v.style}）の指定を優先し、テイストは全体の雰囲気を補う程度にしてください。` : null,
         ] },
+        eventsSection(v, 'image'),
         { h: '避けるもの', items: [
           '細かすぎる装飾、読めない文字や意味のない文字',
           '実在の校章・学校名・ロゴ・商標、既存の作品のキャラクター',
@@ -478,6 +502,8 @@ const F07 = {
         { h: '注意事項', items: [
           '特定の作家・作品・キャラクターの画風をまねないでください。',
           c.std('手や指、物の形などに不自然な描写がないようにしてください。'),
+          c.has(v.motifs) || v.motifCustom || c.has(v.events) ? '主題が分かりにくくなるほどモチーフを増やさないでください。' : null,
+          ...seasonalCautions(v),
         ] },
         { h: '教師が確認する点', items: [
           '実際の掲載媒体（縮小・モノクロ印刷など）で見やすいか',
@@ -510,7 +536,10 @@ const F08 = {
           c.kv('使いたい色', v.colors),
           slots > 0 ? `写真・イラストを後から入れる枠：${slots}つ` : null,
           c.kv('作るときに使うソフト', v.tool),
+          timeLine(v, 'doc'),
+          motifLine(v, 'doc'),
         ] },
+        eventsSection(v, 'doc'),
         { h: '出力形式', items: [
           '最初に、伝えたいことの優先順位（いちばん目立たせる情報、次の情報）を整理してください。',
           isSlide
@@ -518,6 +547,8 @@ const F08 = {
             : `${v.size}の紙面を上から順に領域に分け、各領域に何を置くか（例：上部20％にタイトル）を示し、テキストで描いた簡単な配置図もつけてください。`,
           '見出し・本文の文字サイズの目安（pt）と、読みやすい書体の種類（例：UD書体などの見やすい書体）を示してください。',
           monoLineOrColor(v.mono),
+          designLine(v, { mono: v.mono }),
+          v.designStyle ? '色覚の多様性への配慮・モノクロ印刷・読みやすさの条件は、デザインテイストより優先してください。' : null,
           slots > 0 ? `写真・イラストの枠${slots}つの位置と大きさを示してください。` : null,
           v.tool ? `${v.tool}で作るときの手順のポイントを短く添えてください。` : null,
           'デザインファイルを直接作成できる場合は作成し、できない場合は上の指示書だけで先生が作れるように具体的に書いてください。',
@@ -527,6 +558,7 @@ const F08 = {
           '実在のロゴ・キャラクター・他者の素材は使わないでください。',
           mood.includes('色覚の多様性に配慮') || mood.includes('遠くからでも読める') ? '色だけで情報を区別せず、形・文字・位置でも区別できるようにしてください。' : c.std('色だけで情報を区別しないでください。'),
           mood.includes('遠くからでも読める') ? '教室の後ろからでも読める文字の大きさにしてください。' : null,
+          ...seasonalCautions(v),
         ] },
         { h: '教師が確認する点', items: [
           '載せる情報（日時・名称など）が正しいか',

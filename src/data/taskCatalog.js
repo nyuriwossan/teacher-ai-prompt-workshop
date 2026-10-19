@@ -15,6 +15,8 @@ import {
   SUBJECT_SUGGESTIONS, ICT_SERVICE_SUGGESTIONS,
   DELIVERY_DOC, DELIVERY_TABLE, DELIVERY_PLAIN, PAPER_PRINT,
 } from './formOptions.js';
+import { MONTH_OPTIONS, PERIOD_OPTIONS, SEASON_REFLECT_OPTIONS } from './seasonOptions.js';
+import { DESIGN_STYLE_OPTIONS } from './designStyles.js';
 
 export const CATEGORIES = [
   { id: 'lesson', label: '授業' },
@@ -49,6 +51,43 @@ const paperField = (def = 'A4縦', overrides = {}) => ({
 
 const monoField = (def = false, overrides = {}) => ({
   id: 'mono', label: 'モノクロ印刷で読みやすくする', type: 'check', group: 'output', default: def, ...overrides,
+});
+
+
+// ---- v1.1：時期・学校行事・季節モチーフ・デザインテイスト（group: 'extra'）----
+// panel: time / events / season / design。どれも任意で、使わなければ従来どおりの依頼文になる。
+
+export const EXTRA_PANELS = [
+  { id: 'time', label: '時期', short: '時期' },
+  { id: 'events', label: '学校行事', short: '行事' },
+  { id: 'season', label: '季節モチーフ', short: '季節' },
+  { id: 'design', label: 'デザインテイスト', short: 'デザイン' },
+];
+
+const MONTH_VALUES = MONTH_OPTIONS.map((m) => m.value).filter(Boolean);
+
+const timeFields = () => [
+  { id: 'month', label: '月', type: 'select', group: 'extra', panel: 'time', options: MONTH_OPTIONS, default: '',
+    hint: '作成物を使う時期です。行事の実施日とは別に扱います。' },
+  { id: 'period', label: '時期', type: 'radio', group: 'extra', panel: 'time', options: PERIOD_OPTIONS, default: '',
+    showIf: { field: 'month', in: MONTH_VALUES } },
+];
+
+const eventsField = (stages, overrides = {}) => ({
+  id: 'events', label: '学校行事・学校生活', type: 'events', group: 'extra', panel: 'events', stages,
+  hint: 'どの月でも、どの行事でも選べます。学校での名称（例：青葉祭）も入力できます。', ...overrides,
+});
+
+const motifFields = (reflectKind) => [
+  { id: 'motifs', label: '季節モチーフ（いくつでも）', type: 'motifs', group: 'extra', panel: 'season' },
+  { id: 'motifCustom', label: 'その他のモチーフ', type: 'text', group: 'extra', panel: 'season', placeholder: '例：いちょう、こま、地域の山', maxLength: 60 },
+  { id: 'seasonReflect', label: '季節感の反映', type: 'radio', group: 'extra', panel: 'season', options: SEASON_REFLECT_OPTIONS[reflectKind], default: '',
+    hint: '選ばなければ、季節的な表現を無理に加えません。' },
+];
+
+const designField = (hint) => ({
+  id: 'designStyle', label: 'デザインテイスト', type: 'radio', group: 'extra', panel: 'design', options: DESIGN_STYLE_OPTIONS, default: '',
+  hint,
 });
 
 export const TASKS = [
@@ -259,7 +298,6 @@ export const TASKS = [
           { value: 'students', label: '児童生徒' },
         ] },
       { id: 'title', label: '通信のタイトル', type: 'text', group: 'advanced', placeholder: '例：かがやき（空欄ならAIに案を出してもらいます）', maxLength: 40 },
-      { id: 'season', label: '時期・季節', type: 'text', group: 'advanced', placeholder: '例：10月、2学期の後半', maxLength: 40 },
       { id: 'notices', label: '家庭への連絡・お願い', type: 'textarea', group: 'advanced', placeholder: '例：来週から衣替え移行期間です。上着に記名をお願いします。', maxLength: 400 },
       { id: 'tone', label: '文体', type: 'radio', group: 'advanced', default: 'warm',
         options: [
@@ -273,6 +311,11 @@ export const TASKS = [
         options: [{ value: '0', label: 'なし' }, { value: '1', label: '1つ' }, { value: '2', label: '2つ' }, { value: '3', label: '3つ' }, { value: '4', label: '4つ' }] },
       monoField(true),
       deliveryField(DELIVERY_DOC, 'word'),
+      ...timeFields(),
+      { id: 'season', label: '時期の補足', type: 'text', group: 'extra', panel: 'time', placeholder: '例：2学期の後半、雪の多い地域', maxLength: 40 },
+      eventsField(['prep', 'before', 'after', 'motif']),
+      ...motifFields('all'),
+      designField('紙面の見た目の雰囲気です。文章の文体（詳しく設定する）とは別に選べます。'),
     ],
   },
 
@@ -325,6 +368,10 @@ export const TASKS = [
       { id: 'variants', label: '文案の数', type: 'radio', group: 'output', default: '1案', options: ['1案', '2案（雰囲気違い）'] },
       { id: 'easyJapanese', label: 'やさしい日本語版も作る', type: 'check', group: 'output', default: false },
       deliveryField(DELIVERY_PLAIN, 'text'),
+      ...timeFields(),
+      eventsField(['prep', 'before', 'after']),
+      { id: 'seasonReflect', label: '季節の表現', type: 'radio', group: 'extra', panel: 'time', options: SEASON_REFLECT_OPTIONS.letter, default: '',
+        showIf: { field: 'medium', in: ['letter'] }, hint: '正式なお知らせでは、季節のあいさつを自動では増やしません。' },
     ],
   },
 
@@ -383,6 +430,10 @@ export const TASKS = [
       { id: 'avoid', label: '避けたいもの', type: 'textarea', group: 'advanced', placeholder: '例：怖い表情、細かすぎる装飾', maxLength: 200 },
       { id: 'variants', label: '出してほしい案の数', type: 'radio', group: 'output', default: '1案', options: ['1案', '2案', '4案'] },
       { id: 'altPrompt', label: '画像を作れないAIなら、画像生成AI用の指示文（日本語・英語）を書いてもらう', type: 'check', group: 'output', default: true },
+      ...timeFields(),
+      eventsField(null, { hint: '選んだ行事は、イラストのモチーフとして使います。' }),
+      ...motifFields('image'),
+      designField('全体の雰囲気です。「絵柄」の指定を優先し、それを補う形で使います。'),
     ],
   },
 
@@ -427,6 +478,10 @@ export const TASKS = [
       { id: 'tool', label: '作るときに使うソフト', type: 'select', group: 'output', default: '',
         options: [{ value: '', label: '指定しない' }, 'PowerPoint', 'Googleスライド', 'Canva', 'Word', 'Googleドキュメント', 'Keynote'] },
       monoField(false),
+      ...timeFields(),
+      eventsField(['prep', 'before', 'after', 'motif']),
+      ...motifFields('all'),
+      designField('見た目の雰囲気です。色覚への配慮やモノクロ印刷の条件が優先されます。'),
     ],
   },
 

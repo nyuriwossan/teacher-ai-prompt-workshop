@@ -8,7 +8,10 @@ const add = (el, ...xs) => appendChildren(el, xs);
 import { renderField, setFieldError, focusField } from './ui/fields.js';
 import { copyText } from './ui/clipboard.js';
 import { APP_NAME } from './data/formOptions.js';
-import { TASKS, CATEGORIES, POPULAR_TASK_IDS, getTask, categoryLabel } from './data/taskCatalog.js';
+import {
+  TASKS, CATEGORIES, POPULAR_TASK_IDS, EXTRA_PANELS, getTask, categoryLabel,
+} from './data/taskCatalog.js';
+import { getDesignStyle } from './data/designStyles.js';
 import { searchTasks, searchGuides } from './data/search.js';
 import {
   buildPrompt, validate, getDefaults, getFields, isVisible, cleanValues, usesReference,
@@ -215,7 +218,7 @@ function renderTask(task) {
   document.title = `${task.title}｜${APP_NAME}`;
   const values = valuesFor(task);
   const fields = getFields(task);
-  const groups = { basic: [], advanced: [], output: [] };
+  const groups = { basic: [], advanced: [], extra: [], output: [] };
   fields.forEach((f) => groups[f.group || 'basic'].push(f));
 
   const fieldEls = new Map();
@@ -225,8 +228,12 @@ function renderTask(task) {
     // 表示条件の更新
     for (const f of fields) {
       const el = fieldEls.get(f.id);
-      if (el) el.hidden = !isVisible(f, values);
+      if (el) {
+        el.hidden = !isVisible(f, values);
+        if (typeof el.refresh === 'function' && changedId === 'month') el.refresh();
+      }
     }
+    updatePanelSummaries();
     if (attempted) refreshErrors(false);
     if (state.outputs.has(task.id)) markStale();
     void changedId;
@@ -264,18 +271,41 @@ function renderTask(task) {
 
   const output = h('section', { class: 'output', id: 'output', 'aria-labelledby': 'output-title', hidden: true });
 
+  // v1.1：時期・学校行事・季節モチーフ・デザインテイスト（任意・折りたたみ）
+  const panelSummaryEls = new Map();
+  const updatePanelSummaries = () => {
+    for (const [panel, el] of panelSummaryEls) el.textContent = panelSummary(panel, values);
+  };
+  const extraPanels = EXTRA_PANELS
+    .map((p) => ({ ...p, fields: groups.extra.filter((f) => f.panel === p.id) }))
+    .filter((p) => p.fields.length);
+  let sectionNo = 1;
+  const nextNo = () => String(sectionNo++);
+
   const form = h('form', { class: 'task-form', novalidate: true, id: `form-${task.id}` },
     errorSummary,
     h('section', { class: 'form-section' },
-      h('h2', { class: 'form-section-title' }, h('span', { class: 'num' }, '1'), '基本の入力'),
+      h('h2', { class: 'form-section-title' }, h('span', { class: 'num' }, nextNo()), '基本の入力'),
       makeFieldBlock(groups.basic)),
     groups.advanced.length
       ? h('details', { class: 'form-section details' },
-        h('summary', { class: 'form-section-title summary' }, h('span', { class: 'num' }, '2'), '詳しく設定する', h('span', { class: 'summary-note' }, '任意')),
+        h('summary', { class: 'form-section-title summary' }, h('span', { class: 'num' }, nextNo()), '詳しく設定する', h('span', { class: 'summary-note' }, '任意')),
         h('div', { class: 'details-body' }, makeFieldBlock(groups.advanced)))
       : null,
+    extraPanels.length
+      ? h('section', { class: 'form-section extra-section', 'aria-labelledby': `extra-title-${task.id}` },
+        h('h2', { class: 'form-section-title', id: `extra-title-${task.id}` }, h('span', { class: 'num' }, nextNo()), `${extraPanels.map((p) => p.short).join('・')}の設定`, h('span', { class: 'summary-note' }, '任意')),
+        h('p', { class: 'hint' }, '使わなければ、これまでどおりの依頼文になります。月と行事は別々に選べます。'),
+        extraPanels.map((p) => {
+          const sum = h('span', { class: 'panel-summary', id: `panel-sum-${task.id}-${p.id}` });
+          panelSummaryEls.set(p.id, sum);
+          return h('details', { class: 'panel', id: `panel-${task.id}-${p.id}`, open: panelHasValue(p.id, values) },
+            h('summary', { class: 'panel-title' }, h('span', { class: 'panel-label' }, p.label), sum),
+            h('div', { class: 'panel-body' }, makeFieldBlock(p.fields)));
+        }))
+      : null,
     h('section', { class: 'form-section' },
-      h('h2', { class: 'form-section-title' }, h('span', { class: 'num' }, groups.advanced.length ? '3' : '2'), '出力の設定'),
+      h('h2', { class: 'form-section-title' }, h('span', { class: 'num' }, nextNo()), '出力の設定'),
       makeFieldBlock(groups.output)),
     h('div', { class: 'form-actions' },
       h('button', { type: 'submit', class: 'btn btn-primary btn-large', id: 'generate' }, '依頼文を作る'),
@@ -399,7 +429,25 @@ function renderTask(task) {
     output,
   );
 
+  updatePanelSummaries();
   if (state.outputs.has(task.id)) drawOutput(false);
+}
+
+function panelSummary(panel, v) {
+  switch (panel) {
+    case 'time': return v.month ? `${v.month}月${v.period || ''}` : '指定なし';
+    case 'events': return v.events && v.events.length ? `${v.events.length}件選択中` : '未選択';
+    case 'season': {
+      const n = (v.motifs || []).length + (v.motifCustom && v.motifCustom.trim() ? 1 : 0);
+      return n ? `${n}件選択中` : '未選択';
+    }
+    case 'design': return getDesignStyle(v.designStyle)?.label || '指定なし';
+    default: return '';
+  }
+}
+
+function panelHasValue(panel, v) {
+  return !['指定なし', '未選択', ''].includes(panelSummary(panel, v));
 }
 
 function clearTask(task) {

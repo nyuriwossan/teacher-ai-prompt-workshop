@@ -3,6 +3,7 @@
 import { h, clear, appendChildren } from './dom.js';
 import { normalizeOptions } from '../prompts/buildPrompt.js';
 import { SCHOOL_TYPES, GRADES_BY_SCHOOL } from '../data/formOptions.js';
+import { renderEventsField, renderMotifsField } from './extraFields.js';
 
 function badge(required) {
   return h('span', { class: required ? 'badge badge-required' : 'badge badge-optional' }, required ? '必須' : '任意');
@@ -27,7 +28,7 @@ export function renderField(task, f, values, onChange) {
   const err = h('p', { class: 'field-error', id: errId, hidden: true });
   const set = (val) => { values[f.id] = val; onChange(f.id); };
   const add = (...xs) => appendChildren(wrap, xs); // null を文字列化しない
-  const showBadge = f.group !== 'output';
+  const showBadge = f.group !== 'output' && f.group !== 'extra';
 
   switch (f.type) {
     case 'text':
@@ -200,6 +201,17 @@ export function renderField(task, f, values, onChange) {
       add(h('fieldset', { class: 'fieldset', 'aria-required': 'true' },
         h('legend', { class: 'label' }, h('span', { class: 'label-text' }, f.label), badge(f.required)),
         hint, err, list, addBtn));
+      break;
+    }
+
+    case 'events':
+      add(renderEventsField(task, f, values, onChange, { base, hint, err, badgeEl: null }));
+      break;
+
+    case 'motifs': {
+      const el = renderMotifsField(task, f, values, onChange, { base, hint, err });
+      wrap.refresh = el.refresh;
+      add(el);
       break;
     }
 

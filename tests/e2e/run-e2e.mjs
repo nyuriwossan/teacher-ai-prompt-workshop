@@ -11,6 +11,7 @@ import { chromium, devices } from 'playwright';
 import { TASKS, getTask } from '../../src/data/taskCatalog.js';
 import { getFields, isVisible, normalizeOptions } from '../../src/prompts/buildPrompt.js';
 import { minimalValues } from '../fixtures.js';
+import { readFileSync } from 'node:fs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OUT = join(ROOT, 'test-results');
@@ -31,6 +32,7 @@ const server = http.createServer(async (req, res) => {
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const ORIGIN = `http://127.0.0.1:${server.address().port}`;
+const SNAP = JSON.parse(readFileSync(join(ROOT, 'tests/fixtures/v1.0-prompts.json'), 'utf8'));
 
 // ---------- 小さなテスト枠 ----------
 const results = [];
@@ -86,8 +88,12 @@ async function fillForm(task, values) {
         await page.selectOption(`#${id}`, v.school);
         await page.selectOption(`#${id}-grade`, v.grade); break;
       case 'articles':
-        await page.fill(`#${id}`, v[0].heading);
-        await page.fill(`#${id}-0-b`, v[0].body); break;
+        for (let i = 0; i < v.length; i += 1) {
+          if (i > 0 && !(await page.$(`#${id}-${i}-h`))) await page.click(`#wrap-${id} .btn-add`);
+          await page.fill(i === 0 ? `#${id}` : `#${id}-${i}-h`, v[i].heading);
+          await page.fill(`#${id}-${i}-b`, v[i].body);
+        }
+        break;
       default:
     }
   }
@@ -171,6 +177,8 @@ for (const task of TASKS) {
     const text = await page.inputValue('#prompt-output');
     for (const hd of ['目的', '対象', '条件・入力情報', '出力形式', '注意事項', '教師が確認する点']) assert(text.includes(`【${hd}】`), `【${hd}】がない`);
     assert(!/undefined|null|NaN|\{[a-zA-Z_]+\}/.test(text), '未定義の値がある');
+    const v10 = SNAP[task.id].find((c) => c.kind === 'min' && c.level === 'standard').text;
+    assert(text === v10, '追加設定なしの依頼文が v1.0 と一致しない（テストG）');
     await page.click('.output-toolbar .btn-copy');
     const clip = await readClipboard();
     assert(clip === text, 'クリップボードの内容が一致しない');
@@ -317,9 +325,126 @@ await check('長い依頼文でもスマホ縦画面で崩れない', async () =
   await page.screenshot({ path: join(OUT, 'long-output.png'), fullPage: false });
 });
 
+
+// ---------------------------------------------------------------- v1.1
+async function openPanel(task, panel) {
+  const open = await page.getAttribute(`#panel-${task}-${panel}`, 'open');
+  if (open === null) await page.click(`#panel-${task}-${panel} > summary`);
+}
+
+await check('v1.1 テストD・E・H：10月下旬／体育祭の振り返り＋修学旅行の事前案内＋青葉祭／ポップ×モノクロ（画面操作）', async () => {
+  await page.goto(`${ORIGIN}/#/f/F05`);
+  await clearIfAny();
+  await page.selectOption('#F05-schoolGrade', 'junior');
+  await page.selectOption('#F05-schoolGrade-grade', '2');
+  await page.fill('#F05-articles', '2学期の後半に向けて');
+  await openPanel('F05', 'time');
+  assert(await page.isHidden('#wrap-F05-period'), '月が未指定なのに旬が表示される');
+  await page.selectOption('#F05-month', '10');
+  assert(await page.isVisible('#wrap-F05-period'), '月を選んでも旬が出ない');
+  await page.click('label[for="F05-period-3"]');
+  assert((await page.textContent('#panel-sum-F05-time')) === '10月下旬', 'パネルの要約が更新されない');
+  await openPanel('F05', 'events');
+  await page.fill('#F05-events', '体育祭');
+  assert(await page.isVisible('#F05-events-ev-sports-01'), '体育祭の検索で運動会（関連名称）が出ない');
+  await page.click('#F05-events-ev-sports-02');
+  await page.fill('#F05-events', '');
+  await page.click('#F05-events-tab-trip');
+  await page.click('#F05-events-ev-trip-05');
+  await page.selectOption('#F05-events-sel-0-stage', 'after');
+  await page.selectOption('#F05-events-sel-1-stage', 'prep');
+  await page.fill('#F05-events-custom', '青葉祭');
+  await page.click('#F05-events-custom-add');
+  assert((await page.textContent('#panel-sum-F05-events')) === '3件選択中', '件数の要約が違う');
+  await openPanel('F05', 'season');
+  assert(await page.isVisible('.motif-rec'), '10月のおすすめが表示されない');
+  const pressed = await page.$$eval('.motif-rec .ev-chip[aria-pressed="true"], #wrap-F05-motifs input:checked', (els) => els.length);
+  assert(pressed === 0, 'モチーフが自動で選ばれている');
+  await openPanel('F05', 'design');
+  await page.click('label[for="F05-designStyle-2"]');
+  await noHorizontalOverflow('F05 追加設定を開いた状態');
+  await page.screenshot({ path: join(OUT, 'v11-F05-extra.png'), fullPage: true });
+  await page.click('#generate');
+  const s = await page.inputValue('#prompt-output');
+  for (const want of [
+    '作成物の想定時期は10月下旬です',
+    '－ 体育祭：実施後の振り返り',
+    '－ 修学旅行：事前案内・準備',
+    '－ 青葉祭（学校独自の行事）',
+    '（ここに当日の様子を入力）',
+    'ポップ・元気。モノクロ印刷のため、カラフルな色づかいは前提にせず',
+    '敬体（です・ます）で、温かく落ち着いた文体',
+  ]) assert(s.includes(want), `「${want}」がない`);
+  for (const ng of ['運動会', 'ハロウィン', '紅葉', '明るい配色']) assert(!s.includes(ng), `「${ng}」が勝手に入っている（テストF）`);
+});
+
+await check('v1.1：選んだ行事に学校での名称を付けると「青葉祭（文化祭）」になる／個別に解除できる', async () => {
+  await page.click('#F05-events-sel-0-remove');
+  await page.click('#F05-events-sel-0-remove');
+  await page.click('#F05-events-sel-0-remove');
+  assert((await page.textContent('#panel-sum-F05-events')) === '未選択', '解除できない');
+  await page.click('#F05-events-tab-culture');
+  await page.click('#F05-events-ev-culture-01');
+  await page.fill('#F05-events-sel-0-name', '青葉祭');
+  assert((await page.textContent('.ev-preview')) === '青葉祭（文化祭）', 'プレビューが違う');
+  await page.click('#regenerate');
+  const s = await page.inputValue('#prompt-output');
+  assert(s.includes('－ 青葉祭（文化祭）'), s.slice(0, 200));
+});
+
+await check('v1.1：クリアで行事・時期・テイストも消える', async () => {
+  await page.click('#clear');
+  assert((await page.textContent('#panel-sum-F05-events')) === '未選択', '行事が残る');
+  assert((await page.textContent('#panel-sum-F05-time')) === '指定なし', '時期が残る');
+  assert((await page.textContent('#panel-sum-F05-design')) === '指定なし', 'テイストが残る');
+});
+
+await check('v1.1：F06 はメールのとき季節の表現の項目を出さない／扱い方に「モチーフのみ」がない', async () => {
+  await page.goto(`${ORIGIN}/#/f/F06`);
+  await openPanel('F06', 'time');
+  assert(await page.isVisible('#wrap-F06-seasonReflect'), '文書形式で季節の表現が出ない');
+  await page.click('label[for="F06-medium-1"]');
+  assert(await page.isHidden('#wrap-F06-seasonReflect'), 'メールでも季節の表現が出る');
+  assert(await page.$('#panel-F06-design') === null && await page.$('#panel-F06-season') === null, 'F06にデザイン・モチーフがある');
+  await openPanel('F06', 'events');
+  await page.click('#F06-events-ev-culture-01');
+  const opts = await page.$$eval('#F06-events-sel-0-stage option', (o) => o.map((x) => x.textContent));
+  assert(!opts.some((o) => o.includes('モチーフ')), opts.join());
+  await page.click('#F06-events-sel-0-remove');
+  await page.click('label[for="F06-medium-0"]');
+});
+
+await check('v1.1：F07 は行事をモチーフとして扱い、扱い方の選択を出さない／反映方法に「文章」がない', async () => {
+  await page.goto(`${ORIGIN}/#/f/F07`);
+  await openPanel('F07', 'events');
+  await page.click('#F07-events-ev-trip-01');
+  assert(await page.$('#F07-events-sel-0-stage') === null, 'F07に扱い方の選択がある');
+  await openPanel('F07', 'season');
+  const labels = await page.$$eval('#wrap-F07-seasonReflect .chip-text', (els) => els.map((e) => e.textContent));
+  assert(!labels.some((l) => l.includes('文章')), labels.join());
+  await page.click('#F07-events-sel-0-remove');
+});
+
+await check('v1.1：F08 でもどの月・どの行事でも選べる（月と行事を固定しない）', async () => {
+  await page.goto(`${ORIGIN}/#/f/F08`);
+  await openPanel('F08', 'time');
+  await page.selectOption('#F08-month', '2');
+  await openPanel('F08', 'events');
+  await page.click('#F08-events-tab-sports');
+  await page.click('#F08-events-ev-sports-01'); // 2月の運動会
+  await page.selectOption('#F08-kind', '掲示物・ポスター');
+  await page.fill('#F08-content', '運動会のお知らせ');
+  await page.click('#generate');
+  const s = await page.inputValue('#prompt-output');
+  assert(s.includes('2月') && s.includes('－ 運動会'), s.slice(0, 300));
+  await page.click('#clear');
+});
+
 await check('タップ領域：主要ボタン・選択肢は高さ44px以上', async () => {
   await page.goto(`${ORIGIN}/#/f/F05`);
-  const small = await page.$$eval('button:not(.btn-link):not([hidden]), .chip-text, select, input[type=text], .task-card, .back-link', (els) => els
+  for (const p of ['time', 'events', 'season', 'design']) await openPanel('F05', p);
+  await page.click('#F05-events-ev-sports-02');
+  const small = await page.$$eval('button:not(.btn-link):not([hidden]), .chip-text, select, input[type=text], input[type=search], .task-card, .back-link, .panel-title', (els) => els
     .filter((e) => e.offsetParent !== null)
     .map((e) => ({ t: (e.textContent || e.id || e.tagName).trim().slice(0, 20), h: e.getBoundingClientRect().height }))
     .filter((x) => x.h < 43.5));
@@ -329,6 +454,10 @@ await check('タップ領域：主要ボタン・選択肢は高さ44px以上', 
 await check('フォーム部品にラベルが対応している', async () => {
   for (const t of TASKS) {
     await page.goto(`${ORIGIN}/#/f/${t.id}`);
+    if (await page.$(`#panel-${t.id}-events`)) {
+      for (const p of ['time', 'events', 'season', 'design']) if (await page.$(`#panel-${t.id}-${p}`)) await openPanel(t.id, p);
+      if ((await page.getAttribute(`#${t.id}-events-ev-sports-02`, 'aria-pressed')) !== 'true') await page.click(`#${t.id}-events-ev-sports-02`);
+    }
     const unlabeled = await page.$$eval('form input, form select, form textarea', (els) => els
       .filter((e) => !(e.labels && e.labels.length) && !e.getAttribute('aria-label'))
       .map((e) => e.id || e.name));

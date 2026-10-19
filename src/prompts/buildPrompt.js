@@ -6,6 +6,8 @@ import { TEMPLATES } from './taskTemplates.js';
 import {
   schoolLabel, formatSchoolGrade, learnerTerm, standardLessonMinutes, GRADES_BY_SCHOOL, LEVEL_OPTIONS,
 } from '../data/formOptions.js';
+import { getEventById, EVENT_STAGES, MAX_EVENTS } from '../data/schoolEvents.js';
+import { ALL_MOTIFS } from '../data/seasonOptions.js';
 
 export const REQUIRED_HEADINGS = ['目的', '対象', '条件・入力情報', '出力形式', '注意事項', '教師が確認する点'];
 
@@ -31,6 +33,9 @@ export function defaultValueFor(field) {
   switch (field.type) {
     case 'checks':
       return Array.isArray(field.default) ? [...field.default] : [];
+    case 'events':
+    case 'motifs':
+      return [];
     case 'check':
       return Boolean(field.default);
     case 'schoolGrade':
@@ -88,6 +93,14 @@ export function cleanValues(task, raw = {}) {
       case 'check':
         out[f.id] = Boolean(v);
         break;
+      case 'events':
+        out[f.id] = cleanEvents(f, v);
+        break;
+      case 'motifs': {
+        const arr = Array.isArray(v) ? v : [];
+        out[f.id] = ALL_MOTIFS.filter((m) => arr.includes(m));
+        break;
+      }
       case 'schoolGrade': {
         const school = v && typeof v === 'object' ? String(v.school || '') : '';
         const grades = GRADES_BY_SCHOOL[school] || [];
@@ -116,8 +129,34 @@ export function cleanValues(task, raw = {}) {
   return out;
 }
 
+/**
+ * 学校行事の値を整える。マスタにない基本行事は捨て、学校独自の名称はサニタイズする。
+ * 値の形：[{ key, base, custom, stage }]
+ */
+function cleanEvents(field, v) {
+  const arr = Array.isArray(v) ? v : [];
+  const allowedStages = field.stages ? ['', ...field.stages] : [''];
+  const seen = new Set();
+  const out = [];
+  for (const e of arr) {
+    if (!e || typeof e !== 'object') continue;
+    const master = e.key && !String(e.key).startsWith('custom:') ? getEventById(e.key) : null;
+    const base = master ? master.name : '';
+    const custom = sanitizeText(e.custom, 40).replace(/\n/g, ' ');
+    if (!base && !custom) continue;
+    const key = master ? master.id : `custom:${custom}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const stage = field.stages && allowedStages.includes(e.stage) && EVENT_STAGES.some((s) => s.value === e.stage) ? e.stage : '';
+    out.push({ key, base, custom, stage });
+    if (out.length >= MAX_EVENTS) break;
+  }
+  return out;
+}
+
 function emptyFor(field) {
   switch (field.type) {
+    case 'events': case 'motifs': return [];
     case 'checks': return [];
     case 'check': return false;
     case 'schoolGrade': return { school: '', grade: '' };
@@ -275,7 +314,7 @@ export function buildPrompt(task, raw) {
   const ctx = makeContext(task, values);
   const out = tpl.build(values, ctx);
 
-  const sections = out.sections.map((s) => ({ ...s, items: cleanItems(s.items) }));
+  const sections = out.sections.filter(Boolean).map((s) => ({ ...s, items: cleanItems(s.items) }));
 
   // 注意事項・教師が確認する点に共通規則を加える
   let cautions = sections.find((s) => s.h === '注意事項');
