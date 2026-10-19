@@ -445,7 +445,7 @@ await check('v1.1：F08 でもどの月・どの行事でも選べる（月と�
 await check('v1.2：出力先の初期値は「通常のAI向け」で、Canva向けに切り替えると専用の依頼文になる', async () => {
   await page.goto(`${ORIGIN}/#/f/F05`);
   await clearIfAny();
-  assert(await page.isChecked('#F05-target-0'), '初期値が通常のAI向けでない');
+  assert(await page.isChecked('#F05-target-0'), '初期値が共通でない');
   await fillForm(getTask('F05'), minimalValues(getTask('F05')));
   await page.click('#generate');
   const general = await page.inputValue('#prompt-output');
@@ -453,14 +453,14 @@ await check('v1.2：出力先の初期値は「通常のAI向け」で、Canva�
   await page.fill('#prompt-output', '通常版を手で編集した文章');
   assert(await page.isVisible('#wrap-F05-delivery'), '通常AI向けで仕上がりの使い方が出ない');
   // Canva へ切り替え
-  await page.click('label[for="F05-target-1"]');
+  await page.click('label[for="F05-target-4"]');
   assert(await page.isHidden('#wrap-F05-delivery'), 'Canva向けで重複項目が隠れない');
-  assert((await page.textContent('#generate')) === 'Canva AI向けの依頼文を作る', 'ボタン表示が変わらない');
+  assert((await page.textContent('#generate')) === 'Canva向けの依頼文を作る', 'ボタン表示が変わらない');
   assert(await page.isVisible('#mode-switch-note'), '切り替え後の案内がない');
   assert(!(await page.$('#prompt-output')), '切り替えただけで、もう一方の依頼文が表示されている');
   await page.click('#generate');
   const cv = await page.inputValue('#prompt-output');
-  assert(cv.includes('紙面デザインを作成してください') && cv.includes('■ 掲載する内容') && !cv.includes('【'), cv.slice(0, 200));
+  assert(cv.includes('完成した紙面デザインを作ってください') && cv.includes('■ 紙面に入れる内容') && !cv.includes('【'), cv.slice(0, 200));
   assert((await page.getAttribute('#prompt-output', 'data-mode')) === 'canva');
   assert((await page.textContent('#canva-howto')).includes('Canva AIの入力欄に貼り付けてください'), '操作説明がない');
   // コピー
@@ -479,13 +479,13 @@ await check('v1.2：出力先の初期値は「通常のAI向け」で、Canva�
   await page.click('label[for="F05-target-0"]');
   assert((await page.inputValue('#prompt-output')) === '通常版を手で編集した文章', '通常版の手動編集が消えた');
   assert(await page.isVisible('.edited-note'), '編集済みの表示が消えた');
-  await page.click('label[for="F05-target-1"]');
+  await page.click('label[for="F05-target-4"]');
   assert((await page.inputValue('#prompt-output')) === cv, 'Canva版が保持されていない');
   await page.click('label[for="F05-target-0"]');
 });
 
 await check('v1.2：「Canvaを開く」は依頼文を含まないトップページを新しいタブで開く（スマホ）', async () => {
-  await page.click('label[for="F05-target-1"]');
+  await page.click('label[for="F05-target-4"]');
   // 実際には Canva へ接続しない（遷移先のURLだけを記録して中止する）
   const opened = [];
   await context.route('https://www.canva.com/**', (r) => { opened.push(r.request().url()); r.abort(); });
@@ -495,7 +495,7 @@ await check('v1.2：「Canvaを開く」は依頼文を含まないトップペ�
   await popup.close();
   await context.unroute('https://www.canva.com/**');
   await page.tap('.output-toolbar .btn-copy');
-  assert((await readClipboard()).includes('紙面デザインを作成してください'), 'タップでコピーできない');
+  assert((await readClipboard()).includes('完成した紙面デザインを作ってください'), 'タップでコピーできない');
   await page.click('label[for="F05-target-0"]');
 });
 
@@ -503,12 +503,12 @@ await check('v1.2：F06 はお知らせ文書のときだけ Canva を選べ、�
   await page.goto(`${ORIGIN}/#/f/F06`);
   await clearIfAny();
   assert(await page.isVisible('#wrap-F06-target'), '文書形式で出力先が出ない');
-  await page.click('label[for="F06-target-1"]');
+  await page.click('label[for="F06-target-4"]');
   assert(await page.isHidden('#wrap-F06-delivery') && await page.isHidden('#wrap-F06-variants'), 'Canva向けで重複項目が隠れない');
   await page.selectOption('#F06-purpose', '行事の案内');
   await page.fill('#F06-facts', '11月8日（金）に校外学習を行います。');
   await page.click('#generate');
-  assert((await page.inputValue('#prompt-output')).includes('お知らせ文書のデザインを作成してください'), 'F06のCanva依頼文でない');
+  assert((await page.inputValue('#prompt-output')).includes('お知らせ文書の完成した紙面デザインを作ってください'), 'F06のCanva依頼文でない');
   await page.click('label[for="F06-medium-1"]');
   assert(await page.isHidden('#wrap-F06-target'), 'メールで出力先が出る');
   assert(await page.isVisible('#wrap-F06-delivery'), 'メールで仕上がりの使い方が隠れたまま');
@@ -524,7 +524,7 @@ await check('v1.2：F08 の「使うソフト」と矛盾しない（Canva向け
   await page.goto(`${ORIGIN}/#/f/F08`);
   await clearIfAny();
   await page.selectOption('#F08-tool', 'PowerPoint');
-  await page.click('label[for="F08-target-1"]');
+  await page.click('label[for="F08-target-4"]');
   assert(await page.isHidden('#wrap-F08-tool'), 'Canva向けで使うソフトが出る');
   await page.click('label[for="F08-target-0"]');
   assert((await page.inputValue('#F08-tool')) === 'PowerPoint', '使うソフトの値が消えた');
@@ -535,12 +535,40 @@ await check('v1.2：F07 の Canva 向けは画像生成の指示になる', asyn
   await clearIfAny();
   await page.selectOption('#F07-use', 'プリント・ワークシート');
   await page.fill('#F07-subject', 'どんぐりと落ち葉');
-  await page.click('label[for="F07-target-1"]');
+  await page.click('label[for="F07-target-4"]');
   assert(await page.isHidden('#wrap-F07-altPrompt'), 'Canva向けで重複項目が出る');
   await page.click('#generate');
   const s = await page.inputValue('#prompt-output');
-  assert(s.startsWith('教材用のイラスト画像を1枚生成してください。') && s.includes('主題：どんぐりと落ち葉'), s.slice(0, 100));
+  assert(s.startsWith('プリント・ワークシートに使う教材用のイラスト画像を1枚生成してください。') && s.includes('主題は「どんぐりと落ち葉」です。'), s.slice(0, 100));
   await page.click('label[for="F07-target-0"]');
+});
+
+
+await check('v1.3：出力先は5つ。ChatGPT・Gemini・Claude向けは共通と同じ依頼文で、その旨を表示', async () => {
+  await page.goto(`${ORIGIN}/#/f/F08`);
+  await clearIfAny();
+  const labels = await page.$$eval('#wrap-F08-target .chip-text', (els) => els.map((e) => e.textContent));
+  assert(labels.join('|') === '共通（既存どおり）|ChatGPT向け|Gemini向け|Claude向け|Canva向け', labels.join('|'));
+  assert(await page.isChecked('#F08-target-0'), '初期値が共通でない');
+  await page.selectOption('#F08-kind', '掲示物・ポスター');
+  await page.fill('#F08-content', '廊下は右側を歩こう。');
+  await page.click('#generate');
+  const common = await page.inputValue('#prompt-output');
+  for (const [i, name] of [[1, 'ChatGPT向け'], [2, 'Gemini向け'], [3, 'Claude向け']]) {
+    await page.click(`label[for="F08-target-${i}"]`);
+    assert((await page.inputValue('#prompt-output')) === common, `${name}で依頼文が変わった`);
+    assert((await page.textContent('#target-note')).includes(`${name}。現時点では共通と同じ依頼文です`), `${name}の表示がない`);
+    assert(await page.isHidden('#canva-tip'), 'Canva以外でCanvaのヒントが出る');
+  }
+  await page.click('label[for="F08-target-4"]');
+  assert(await page.isVisible('#canva-tip'), 'Canva向けでヒントが出ない');
+  assert((await page.textContent('#canva-tip')).includes('既存のテンプレートの編集と併用'), 'ヒントの文言');
+  await page.click('#generate');
+  const cv = await page.inputValue('#prompt-output');
+  assert(cv.startsWith('掲示物・ポスターの完成したデザインを作ってください。'), cv.slice(0, 60));
+  assert(!cv.includes('既存のテンプレート') && !cv.includes('不安定'), 'ヒントが依頼文に混ざっている');
+  await page.screenshot({ path: join(OUT, 'v13-F08-canva.png'), fullPage: true });
+  await page.click('label[for="F08-target-0"]');
 });
 
 await check('タップ領域：主要ボタン・選択肢は高さ44px以上', async () => {
@@ -558,7 +586,7 @@ await check('v1.2：Canva向け出力のボタン・リンクも高さ44px以上
   await page.goto(`${ORIGIN}/#/f/F05`);
   await clearIfAny();
   await fillForm(getTask('F05'), minimalValues(getTask('F05')));
-  await page.click('label[for="F05-target-1"]');
+  await page.click('label[for="F05-target-4"]');
   await page.click('#generate');
   const small = await page.$$eval('#output button, #output a, #wrap-F05-target .chip-text', (els) => els
     .filter((e) => e.offsetParent !== null)

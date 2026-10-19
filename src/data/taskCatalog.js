@@ -90,18 +90,27 @@ const designField = (hint) => ({
   hint,
 });
 
-// ---- v1.2：出力先（通常のAI／Canva AI）----
-// 初期値は必ず「通常のAI向け」。hideInCanva の項目は Canva 向けのときだけ隠す（値は消さない）。
+// ---- v1.2〜v1.3：出力先（共通／ChatGPT／Gemini／Claude／Canva）----
+// 初期値は必ず「共通」。hideInCanva の項目は Canva 向けのときだけ隠す（値は消さない）。
 
 export const CANVA_TASK_IDS = ['F05', 'F06', 'F07', 'F08'];
 
+/** 出力先の選択肢。'general'（共通）は v1.2 までの「通常のAI向け」と同じ値 */
+export const TARGET_OPTIONS = [
+  { value: 'general', label: '共通（既存どおり）', hint: 'どのAIにもそのまま使える' },
+  { value: 'chatgpt', label: 'ChatGPT向け' },
+  { value: 'gemini', label: 'Gemini向け' },
+  { value: 'claude', label: 'Claude向け' },
+  { value: 'canva', label: 'Canva向け', hint: '完成デザインを作る' },
+];
+
+/** ChatGPT・Gemini・Claude 向けは、現時点では共通と同じ依頼文を使う（モデル別の最適化を装わない） */
+export const GENERAL_FAMILY_TARGETS = ['general', 'chatgpt', 'gemini', 'claude'];
+
 const targetField = (overrides = {}) => ({
-  id: 'target', label: '依頼文の出力先', type: 'radio', group: 'output', default: 'general',
-  options: [
-    { value: 'general', label: '通常のAI向け', hint: 'ChatGPT・Claude・Geminiなど' },
-    { value: 'canva', label: 'Canva AI向け', hint: 'デザインを作成' },
-  ],
-  hint: 'Canva AI向けは、Canvaに貼り付けてデザインそのものを作ってもらうための依頼文です。入力した内容はそのまま使われます。',
+  id: 'target', label: '出力先（AI・ツール）', type: 'radio', group: 'output', default: 'general',
+  options: TARGET_OPTIONS,
+  hint: 'Canva向けは、Canvaに貼り付けて完成デザインを作ってもらうための依頼文です。入力した内容はそのまま使われます。',
   ...overrides,
 });
 
@@ -375,7 +384,7 @@ export const TASKS = [
           { value: 'more-polite', label: 'より丁寧（おわびを含むなど）' },
           { value: 'concise', label: '簡潔に' },
         ] },
-      targetField({ showIf: { field: 'medium', in: ['letter'] }, hint: 'Canva AI向けは「お知らせ文書（紙・配信）」のときだけ選べます。メール・連絡アプリは通常のAI向けです。' }),
+      targetField({ showIf: { field: 'medium', in: ['letter'] }, hint: 'Canva向けは「お知らせ文書（紙・配信）」のときだけ選べます。メール・連絡アプリでは、この項目は表示されず共通の依頼文になります。' }),
       { id: 'length', label: '分量', type: 'radio', group: 'output', default: 'standard',
         options: [
           { value: 'short', label: '短め' },

@@ -1,15 +1,19 @@
-// v1.2：Canva AI 向けの依頼文。
-// 通常AI向け（buildPrompt / taskTemplates）とは独立した組み立て処理。
-// - Canva に直接貼り付けて「完成したデザイン」を作ってもらうための、簡潔な制作指示にする。
+// Canva 向けの依頼文（v1.2 で追加、v1.3 で「通りやすい型」に作り直し）。
+// 共通（通常AI向け：buildPrompt / taskTemplates）とは独立した組み立て処理。
+//
+// v1.3 の型（完成デザイン生成に向けた、入れ子の少ない自然文）：
+//   冒頭：何を作るか・完成デザインであること・配布用であること
+//   ■ サイズ・形式 → ■ デザイン → ■ 紙面に入れる内容（固定で入れる文字／記入欄／本文の材料）
+//   → ■ 文章の書き方 → ■ レイアウト → ■ してほしくないこと
+// - 箇条書きは1段だけ。Markdown 記法は使わない。
 // - 教師向けの注意事項は依頼文に混ぜず、notes として返して画面側で別に表示する
 //   （注意書きがデザイン内の文字として印刷されるのを防ぐため）。
 // - 行事・季節・テイストのデータは v1.1 の共通データを再利用する（重複実装しない）。
 
 import { validate, makeContext, cleanValues } from './buildPrompt.js';
 import { CANVA_TASK_IDS } from '../data/taskCatalog.js';
-import { eventDisplayName } from '../data/schoolEvents.js';
 import { ANNUAL_MOTIFS, formatTime } from '../data/seasonOptions.js';
-import { designStyleLine } from '../data/designStyles.js';
+import { designStyleLine, designStyleSentence } from '../data/designStyles.js';
 
 // ---------------------------------------------------------------- 判定
 
@@ -20,88 +24,100 @@ export function isCanvaMode(task, values) {
   return v.target === 'canva';
 }
 
+/** 画面に出す Canva 向けのヒント（依頼文には含めない） */
+export const CANVA_TIP = 'Canvaでは、完成デザインの生成が不安定な場合があります。うまくいかないときは、内容を少し簡潔にするか、既存のテンプレートの編集と併用してください。';
+
+export const CANVA_URL = 'https://www.canva.com/';
+
 // ---------------------------------------------------------------- 共通部品
+
+/** 複数行を1行にまとめる（句点などの後は空白を入れない） */
+const oneLine = (s) => String(s || '').split('\n').map((x) => x.trim()).filter(Boolean)
+  .reduce((acc, line) => (!acc ? line : `${acc}${/[。．！？!?」）)]$/.test(acc) ? '' : '、'}${line}`), '');
 
 function paperDesc(paper) {
   if (!paper) return '';
   const m = String(paper).match(/^(A3|A4|B4|B5)(縦|横)$/);
-  if (m) return `${m[1]}サイズ・${m[2]}向き`;
+  if (m) return `${m[1]}${m[2]}`;
   return paper;
 }
 
-const REFLECT_TEXT = {
-  doc: {
-    '': '季節の表現は控えめにし、無理に加えない',
-    text: '季節感は文章だけに反映する',
-    design: '季節感は配色や飾りだけに反映する',
-    both: '季節感を文章とデザインの両方に反映する',
-    none: '季節の表現は入れない',
-  },
-  image: {
-    '': '季節の表現は控えめにし、無理に加えない',
-    design: '季節感をイラストに反映する',
-    none: '季節の表現は入れない',
-  },
-};
-
-function timeItem(v, kind = 'doc') {
+/** 「紙面の想定時期は10月下旬です。季節感は控えめにしてください。」 */
+function timeSentence(v, kind = 'doc') {
   const t = formatTime(v.month, v.period);
-  if (!t) return null;
   const hasMotifs = (v.motifs && v.motifs.length) || v.motifCustom;
-  let r = (REFLECT_TEXT[kind] || REFLECT_TEXT.doc)[v.seasonReflect || ''] || REFLECT_TEXT.doc[''];
-  if (v.seasonReflect === 'none' && hasMotifs) r = '選んだモチーフ以外の季節の表現は入れない';
-  return `使う時期：${t}（${r}）。この時期は行事の実施日ではありません。`;
+  if (!t) return null;
+  const subject = kind === 'image' ? 'イラストの想定時期' : '紙面の想定時期';
+  const reflect = {
+    '': '季節感は控えめにしてください。',
+    text: '季節感は文章にだけ少し反映し、飾りには加えないでください。',
+    design: kind === 'image' ? '季節感をイラストに反映してください（盛りすぎない程度に）。' : '季節感は配色や飾りにだけ反映してください（盛りすぎない程度に）。',
+    both: '季節感を文章と飾りの両方に反映してください（盛りすぎない程度に）。',
+    none: hasMotifs ? '選んだ季節の飾り以外に、季節の表現は入れないでください。' : '季節の表現は入れないでください。',
+  }[v.seasonReflect || ''] || '季節感は控えめにしてください。';
+  const notEventDate = (v.events || []).length ? 'この時期は行事の実施日ではありません。' : '';
+  return `${subject}は${t}です。${reflect}${notEventDate}`;
 }
 
-function motifItem(v) {
+function motifSentence(v, kind = 'doc') {
   const list = [...(v.motifs || []), ...(v.motifCustom ? [v.motifCustom] : [])];
   if (!list.length) return null;
-  return `季節モチーフ：${list.join('、')}（飾りとして控えめに使う）`;
+  return kind === 'image'
+    ? `${list.join('・')}を、主題が分かりにくくならない程度に控えめに添えてください。`
+    : `季節の飾りとして、${list.join('・')}を控えめに使ってください。`;
 }
 
-const STAGE_SHORT = {
-  prep: '事前のお知らせ・準備',
-  before: '実施直前の呼びかけ',
-  after: '実施後の振り返り（当日の様子は入力された内容だけ。ない部分は記入欄）',
-  motif: '飾り・イラストのモチーフとしてだけ使う',
-  '': '名前にふれる程度',
-};
-
-/** 掲載内容として扱う行事（モチーフのみ以外） */
-function contentEventItems(v) {
-  const list = (v.events || []).filter((e) => e.stage !== 'motif');
-  if (!list.length) return [];
-  return [
-    ['取り上げる行事（表記はこのまま使う）', ...list.map((e) => `－ ${eventDisplayName(e)}：${STAGE_SHORT[e.stage] || STAGE_SHORT['']}`)].join('\n'),
-  ];
+/** 行事の名前の文。「行事名は『青葉祭』を使用してください。文化祭にあたる行事です。」 */
+function eventNameSentence(e) {
+  const custom = (e.custom || '').trim();
+  if (e.base && custom && custom !== e.base) return `行事名は「${custom}」を使用してください。${e.base}にあたる行事です。`;
+  if (!e.base && custom) return `「${custom}」は学校独自の行事名です。表記はこのまま使ってください。`;
+  return null;
 }
 
-/** デザインのモチーフとして扱う行事 */
-function motifEventItem(v, all = false) {
+function eventName(e) {
+  const custom = (e.custom || '').trim();
+  return custom || e.base;
+}
+
+/** 本文で扱う行事の文（モチーフのみの行事は除く） */
+function eventContentSentences(v) {
+  const out = [];
+  for (const e of (v.events || []).filter((x) => x.stage !== 'motif')) {
+    const n = `「${eventName(e)}」`;
+    const nameS = eventNameSentence(e);
+    if (nameS) out.push(nameS);
+    out.push({
+      prep: `${n}は事前のお知らせとして扱います。日程・持ち物などは書き加えず、必要な所は記入欄にしてください。`,
+      before: `${n}は実施直前の呼びかけとして扱います。練習の様子などは書き加えないでください。`,
+      after: `${n}は実施後の振り返りとして扱います。当日の様子や結果は書き加えず、「（ここに当日の様子を入力）」の記入欄にしてください。`,
+      '': `${n}は名前にふれる程度にしてください。内容や結果は書き加えないでください。`,
+    }[e.stage || '']);
+  }
+  return out;
+}
+
+/** 飾りのモチーフとして使う行事の文 */
+function eventMotifSentences(v, { all = false } = {}) {
   const list = (v.events || []).filter((e) => all || e.stage === 'motif');
-  if (!list.length) return null;
-  return `モチーフにする行事：${list.map(eventDisplayName).join('、')}（その行事を連想させる一般的な絵柄にとどめる）`;
+  if (!list.length) return [];
+  const out = list.map(eventNameSentence).filter(Boolean);
+  out.push(`${list.map((e) => `「${eventName(e)}」`).join('・')}は、その行事を連想させる一般的な飾りのモチーフとしてだけ使い${all ? 'ます' : '、本文では触れないでください'}。`);
+  return out;
 }
 
-function eventRule(v) {
-  if (!(v.events || []).length) return null;
-  return '行事の日付・場所・内容・結果は書き加えず、必要なら記入欄にしてください。ここに挙げていない行事は加えないでください。';
-}
-
-function annualRule(v) {
-  return (v.motifs || []).some((m) => ANNUAL_MOTIFS.includes(m))
-    ? '正月・ハロウィンなどの年中行事は、学校で実施した行事として書かないでください。'
-    : null;
-}
-
-function editableRules({ editable = true } = {}) {
+/** 最後にまとめる「してほしくないこと」（1段の箇条書き） */
+function prohibitions(v, { image = false, fixedText = true } = {}) {
   return [
-    editable ? '可能な限り、文字・図形・写真枠を後から個別に編集しやすい形で制作してください。' : null,
-    '掲載する内容に書かれていない日時・場所・名称・出来事・人物を加えないでください。',
-    '指定した見出し・本文・連絡事項の文言を、勝手に削除したり意味を変えたりしないでください。',
-    '情報が足りない部分は「（日時）」「（場所）」のような、編集できる記入欄として残してください。',
-    '実在の学校名・校章・ロゴや、実在の人物の写真・似顔絵は使わないでください。',
-    'この依頼文の説明や指示の文章は、デザインの中に文字として入れないでください。',
+    image ? null : '・入力していない日時・場所・名称・出来事・人物を足さない',
+    (v.events || []).length ? '・ここに挙げていない行事を足さない' : null,
+    (v.motifs || []).some((m) => ANNUAL_MOTIFS.includes(m)) ? '・正月・ハロウィンなどの年中行事を、学校で行った行事として書かない' : null,
+    image ? null : (fixedText ? '・固定で入れる文字を変えたり省いたりしない' : null),
+    image
+      ? '・実在の校章・学校名・ロゴ・商標、既存のキャラクター、実在の人物の顔や容姿を描かない'
+      : '・実在の学校名・校章・ロゴや、実在の人物の写真・似顔絵を入れない',
+    image ? null : '・児童生徒の名前など、個人が特定できる情報を入れない',
+    image ? '・この依頼文の文章を画像の中に文字として入れない' : '・この依頼文の文章そのものを紙面に入れない',
   ];
 }
 
@@ -117,56 +133,61 @@ function canvaF05(v, c) {
   const school = c.sg(v.schoolGrade);
   const articles = v.articles || [];
   const photos = Number(v.photoSlots || 0);
-  const pages = v.pages && v.pages.startsWith('2') ? '2ページ（表裏）' : '1ページ';
+  const twoPages = v.pages && v.pages.startsWith('2');
   const readers = { parents: '保護者', both: '児童生徒と保護者', students: '児童生徒' }[v.audience] || '保護者';
   const tone = {
-    warm: '敬体（です・ます）で温かく落ち着いた文章',
-    concise: '敬体（です・ます）で簡潔な文章',
-    friendly: '児童生徒も読みやすい、親しみのある敬体の文章',
-  }[v.tone] || '敬体（です・ます）で温かく落ち着いた文章';
+    warm: '敬体（です・ます）で温かく',
+    concise: '敬体（です・ます）で簡潔に',
+    friendly: '児童生徒も読みやすい親しみのある敬体で',
+  }[v.tone] || '敬体（です・ます）で温かく';
 
-  const articleItems = articles.map((a, i) => {
-    const lines = [`記事${i + 1}`];
-    lines.push(a.heading ? `見出し：「${a.heading}」` : '見出し：内容に合う短い見出し');
-    if (a.body) lines.push(`本文の材料：${a.body.split('\n').join('\n　')}`);
-    else lines.push('本文：「（ここに本文を入力）」の記入欄');
-    return lines.join('\n');
-  });
+  const fixed = [
+    v.title ? `・通信名「${v.title}」` : null,
+    ...articles.filter((a) => a.heading).map((a) => `・見出し「${a.heading}」`),
+    v.notices ? `・家庭への連絡（囲み枠で）「${oneLine(v.notices)}」` : null,
+  ].filter(Boolean);
+  const blanks = [
+    v.title ? null : '・通信名（「（通信名）」）',
+    '・号数（第○号）',
+    '・発行日（○月○日）',
+    '・学年・学級名、担任名',
+    ...articles.map((a, i) => (a.heading ? null : `・記事${i + 1}の見出し`)),
+    ...articles.map((a, i) => (a.body ? null : `・記事${i + 1}の本文（「（ここに本文を入力）」）`)),
+  ].filter(Boolean);
+  const materials = articles
+    .map((a, i) => (a.body ? `・${a.heading ? `「${a.heading}」` : `記事${i + 1}`}：${oneLine(a.body)}` : null))
+    .filter(Boolean);
 
   return {
-    lead: [
-      `${school}の${v.kind}の紙面デザインを作成してください。`,
-      'レイアウト案の説明ではなく、印刷してそのまま配布できる完成したデザインを作ってください。',
-    ],
+    lead: `${v.kind}（${school}）の完成した紙面デザインを作ってください。レイアウト案の説明ではなく、印刷してそのまま${readers}に配布できる完成デザインにしてください。`,
     sections: [
-      { h: 'サイズ・形式', items: [
-        `用紙：${paperDesc(v.paper || 'A4縦')}、${pages}`,
-        `用途：印刷して配布する（おもな読者：${readers}）`,
-        v.mono ? 'モノクロ印刷で読みやすいデザインにしてください（色に頼らず、太字・罫線・囲み・濃淡で区別する）。' : null,
+      { h: 'サイズ・形式', lines: [
+        `${paperDesc(v.paper || 'A4縦')}・${twoPages ? '2ページ（表裏）' : '1ページ'}です。読者は${readers}です。`,
       ] },
-      { h: '掲載する内容', items: [
-        v.title ? `通信名：「${v.title}」` : '通信名：「（通信名）」の記入欄',
-        '紙面の上部に、号数「第○号」・発行日「○月○日」・学年学級名と担任名の記入欄',
-        ...articleItems,
-        `各記事の本文は、上の材料だけをもとに${tone}で短くまとめてください。材料にない出来事・児童生徒の様子や感想は加えず、材料が少なければ短いままで構いません。`,
-        ...contentEventItems(v),
-        v.notices ? `家庭への連絡（囲み枠で）：${v.notices}` : null,
-        photos > 0 ? `写真・イラストの枠：${photos}か所（あとで写真を差し替えられる空の枠にし、写真の中身は描き込まない）` : null,
+      { h: 'デザイン', lines: [
+        designStyleSentence(v.designStyle, { mono: v.mono }),
+        timeSentence(v),
+        motifSentence(v),
+        ...eventMotifSentences(v),
       ] },
-      { h: 'デザイン', items: [
-        `レイアウト：記事${articles.length}本${photos > 0 ? `と写真枠${photos}か所` : ''}を、見出しと本文のまとまりが分かるように配置する。見出しは本文より大きく太くする。`,
-        '本文は印刷して読みやすい大きさ（目安10.5pt以上）にしてください。入り切らない場合は、文字を極端に小さくせず、レイアウトや余白の調整を優先してください。',
-        designStyleLine(v.designStyle, { mono: v.mono, subject: 'デザイン' }),
-        timeItem(v),
-        motifItem(v),
-        motifEventItem(v),
+      { h: '紙面に入れる内容', lines: [
+        fixed.length ? '固定で入れる文字（このとおりに入れてください）：' : null,
+        ...fixed,
+        '記入欄として残す部分（後から書き込めるように）：',
+        ...blanks,
+        materials.length ? '記事本文の材料：' : null,
+        ...materials,
+        photos > 0 ? `写真枠：${photos}か所。後から写真を差し替えやすい空の枠にし、写真の中身は描かないでください。` : null,
       ] },
-      { h: '制作の条件', items: [
-        ...editableRules(),
-        eventRule(v),
-        annualRule(v),
-        '児童生徒の名前や、個人が特定できる写真・描写は入れないでください。',
+      { h: '文章の書き方', lines: [
+        `各記事の本文は、上の材料だけを使って${tone}、短くまとめてください。材料にない出来事・感想・児童生徒の様子は加えず、材料が少ない記事は短いままで構いません。`,
+        ...eventContentSentences(v),
       ] },
+      { h: 'レイアウト', lines: [
+        `見出しを本文より大きく太くし、記事${articles.length > 1 ? 'ごと' : ''}のまとまりが分かるように配置してください。本文は印刷して読みやすい大きさ（10.5pt以上が目安）にし、入り切らないときは文字を小さくしすぎず、余白や配置で調整してください。`,
+        `文字・図形・写真枠は、可能な限り後から個別に編集しやすい形で作ってください。`,
+      ] },
+      { h: 'してほしくないこと', lines: prohibitions(v, { fixedText: fixed.length > 0 }) },
     ],
     notes: [
       ...COMMON_NOTES,
@@ -187,45 +208,51 @@ function canvaF06(v, c) {
     concise: '丁寧さを保った簡潔な文章',
   }[v.tone] || '保護者に向けた丁寧な敬語';
   let greeting;
-  if (v.seasonReflect === 'none') greeting = '前文：時候のあいさつは入れず、短い前置きだけにする';
-  else if (v.seasonReflect === 'text' && t) greeting = `前文：${t}に合う時候のあいさつを短く一文`;
-  else greeting = '前文：短く一文程度';
+  if (v.seasonReflect === 'none') greeting = '時候のあいさつは入れず、前置きは短くしてください。';
+  else if (v.seasonReflect === 'text' && t) greeting = `前文には${t}に合う時候のあいさつを短く一文入れてください。`;
+  else greeting = '前文は短く一文程度にしてください。';
+
+  const fixed = [
+    v.audience === 'individual' ? null : '・宛名「保護者各位」',
+    `・伝える事実「${oneLine(v.facts)}」`,
+    v.requests ? `・保護者へのお願い「${oneLine(v.requests)}」` : null,
+    v.contact ? `・問い合わせ先「${oneLine(v.contact)}」` : null,
+  ].filter(Boolean);
+  const blanks = [
+    v.audience === 'individual' ? '・宛名（「（保護者名）様」）' : null,
+    '・発行日',
+    '・発信者（学校名・担任名など）',
+    v.contact ? null : '・問い合わせ先',
+    v.requests ? '・切り取り線つきの返信欄' : null,
+  ].filter(Boolean);
 
   return {
-    lead: [
-      `${audience}に向けたお知らせ文書のデザインを作成してください。`,
-      '印刷・PDFで配布する、学校の正式な文書にふさわしい完成したデザインを作ってください。',
-    ],
+    lead: `${audience}に向けたお知らせ文書の完成した紙面デザインを作ってください。印刷やPDFで配布する学校の正式な文書なので、装飾は控えめにし、丁寧で読みやすい配置を重視してください。`,
     sections: [
-      { h: 'サイズ・形式', items: [
-        `用紙：A4サイズ・縦向き、${v.length === 'long' ? '1ページ（どうしても収まらない場合のみ2ページ）' : '1ページ'}`,
-        '用途：印刷またはPDFで保護者に配布する',
-        v.easyJapanese ? '次のページに、同じ内容の「やさしい日本語版」を入れてください（一文を短く、日時・持ち物は箇条書き）。' : null,
+      { h: 'サイズ・形式', lines: [
+        `A4縦・${v.length === 'long' ? '1ページ（どうしても収まらない場合のみ2ページ）' : '1ページ'}です。読者は${audience}です。`,
+        v.easyJapanese ? '次のページに、同じ内容の「やさしい日本語版」を入れてください。' : null,
       ] },
-      { h: '掲載する内容', items: [
-        v.audience === 'individual' ? '宛名：「（保護者名）様」の記入欄' : '宛名：「保護者各位」',
-        '発行日・発信者（学校名・担任名など）：記入欄',
-        v.purpose && v.purpose !== 'その他' ? `表題：内容に合う短い表題（連絡の目的：${v.purpose}）` : '表題：内容に合う短い表題',
-        greeting,
-        c.kv('伝える事実（このとおり正確に掲載）', v.facts),
-        c.kv('保護者へのお願い', v.requests),
-        v.requests ? '返信欄：提出や回答が必要な場合は、切り取り線つきの返信欄' : null,
-        v.contact ? c.kv('問い合わせ先', v.contact) : '問い合わせ先：記入欄',
-        ...contentEventItems(v),
-        `文章：${tone}`,
+      { h: 'デザイン', lines: [
+        '落ち着いて整った、学校の文書らしいデザインにしてください。日時・場所・持ち物・期限は、罫線や囲みで本文と分けて見つけやすくしてください（伝える事実に書かれているものだけ）。',
+        t ? `紙面の想定時期は${t}です。イラストや季節の飾りは${v.seasonReflect === 'none' ? '使わないでください' : '使わないか、ごく小さくしてください'}。` : 'イラストや飾りは使わないか、ごく小さくしてください。',
       ] },
-      { h: 'デザイン', items: [
-        '日時・場所・持ち物・期限は、本文とは別に見つけやすい枠や箇条書きにまとめてください（伝える事実に書かれているものだけ）。',
-        '学校の正式な文書にふさわしい、落ち着いて整ったレイアウトにしてください。装飾は控えめにし、本文の読みやすさを妨げないでください。',
-        '本文は印刷して読みやすい大きさ（目安10.5〜12pt）にしてください。',
-        t ? `使う時期：${t}。季節の飾りは${v.seasonReflect === 'none' ? '入れないでください' : '入れないか、ごく控えめにしてください'}。` : null,
+      { h: '紙面に入れる内容', lines: [
+        '固定で入れる文字（このとおりに入れてください）：',
+        ...fixed,
+        '記入欄として残す部分：',
+        ...blanks,
+        `表題は、${v.purpose && v.purpose !== 'その他' ? `連絡の目的（${v.purpose}）` : '内容'}に合う短いものにしてください。`,
       ] },
-      { h: '制作の条件', items: [
-        ...editableRules(),
-        '伝える事実の日時・場所・金額などを書き換えたり、補ったりしないでください。',
-        eventRule(v),
-        v.audience === 'individual' ? '欠席・成績・トラブル・家庭の事情など、個別の事情に踏み込んだ内容は書かないでください。' : null,
+      { h: '文章の書き方', lines: [
+        `${tone}で書いてください。${greeting}伝える事実の日時・場所・金額などは書き換えたり補ったりしないでください。`,
+        ...eventContentSentences(v),
+        v.audience === 'individual' ? '個別の家庭への連絡ですが、欠席・成績・トラブル・家庭の事情など、個別の事情には触れないでください。' : null,
       ] },
+      { h: 'レイアウト', lines: [
+        '本文は印刷して読みやすい大きさ（10.5〜12ptが目安）にし、余白を十分にとってください。文字・罫線・囲みは、可能な限り後から個別に編集しやすい形で作ってください。',
+      ] },
+      { h: 'してほしくないこと', lines: prohibitions(v) },
     ],
     notes: [
       ...COMMON_NOTES,
@@ -235,66 +262,54 @@ function canvaF06(v, c) {
   };
 }
 
-// ---------------------------------------------------------------- F07 教材用イラスト
+// ---------------------------------------------------------------- F07 教材用イラスト（任意対応）
 
 function canvaF07(v, c) {
   const n = Number(String(v.variants).replace(/[^0-9]/g, '')) || 1;
   const mono = v.color === 'mono' || v.color === 'lineart';
   const colorText = {
-    color: 'カラー。印刷しても色がつぶれない明るさとコントラスト',
-    pale: '淡くやさしい色合い。輪郭ははっきりさせる',
-    mono: '白黒（モノクロ）。グレーの細かい階調に頼らず、モノクロ印刷でも形がはっきり分かるコントラスト',
-    lineart: '黒い線だけのぬりえ用線画。塗りつぶし・グレーは使わず、線は太めで、塗りやすい閉じた形',
+    color: 'カラーで、印刷しても色がつぶれない明るさとコントラストにしてください。',
+    pale: '淡くやさしい色合いにし、輪郭ははっきりさせてください。',
+    mono: '白黒（モノクロ）にし、細かいグレーの階調に頼らず、モノクロ印刷でも形がはっきり分かるようにしてください。',
+    lineart: '黒い線だけのぬりえ用線画にしてください。塗りつぶしやグレーは使わず、線は太めで、塗りやすい閉じた形にしてください。',
   }[v.color];
   const bg = {
-    subtle: '控えめにし、主題を目立たせる',
-    full: '背景まで描くが、主題が埋もれないようにする',
-    white: '白（切り抜きやすく）',
-    transparent: '透明（できない場合は白）',
+    subtle: '背景は控えめにし、主題を目立たせてください。',
+    full: '背景まで描いてかまいませんが、主題が埋もれないようにしてください。',
+    white: '背景は白にしてください（切り抜きやすく）。',
+    transparent: '背景は透明にしてください（できない場合は白）。',
   }[v.background];
   const people = {
-    none: '人物は描かない',
-    small: '人物は小さく、後ろ姿など顔が分からない描き方',
-    generic: '人物は、特定の誰かではないデフォルメした子ども',
+    none: '人物は描かないでください。',
+    small: '人物は小さく、後ろ姿など顔が分からない描き方にしてください。',
+    generic: '人物は、特定の誰かではないデフォルメした子どもにしてください。',
   }[v.people];
   const text = v.textMode === 'some' && v.textContent
-    ? `画像内の文字は「${v.textContent}」だけにし、正確に表記する（崩れる場合は文字なしにする）`
-    : '文字・数字・記号は一切入れない';
+    ? `画像内の文字は「${v.textContent}」だけにし、正確に表記してください（崩れる場合は文字なしにしてください）。`
+    : '文字・数字・記号は一切入れないでください。';
 
   return {
-    lead: [
-      `教材用のイラスト画像を${n > 1 ? `${n}案` : '1枚'}生成してください。`,
-      `用途：${v.use}`,
-    ],
+    lead: `${v.use}に使う教材用のイラスト画像を${n > 1 ? `${n}案` : '1枚'}生成してください。主題は「${oneLine(v.subject)}」です。${people || ''}`,
     sections: [
-      { h: '描くもの', items: [`主題：${v.subject}`, people] },
-      { h: '画風・構図', items: [
-        `絵柄：${v.style}`,
-        designStyleLine(v.designStyle, { mono, subject: '全体' }),
-        v.designStyle ? `絵柄の指定を優先し、テイストは雰囲気を補う程度にする` : null,
-        `比率：${v.aspect}`,
-        bg ? `背景：${bg}` : null,
-        v.printSize ? `使う大きさ：${v.printSize}${v.printSize === '紙面に小さく配置' ? '（小さくても判別できるよう、形を大きくシンプルに）' : ''}` : null,
+      { h: '画風・構図', lines: [
+        `絵柄は${v.style}、比率は${v.aspect}です。${bg || ''}`,
+        v.designStyle ? `${designStyleLine(v.designStyle, { mono, subject: '全体' })}絵柄の指定を優先し、テイストは雰囲気を補う程度にしてください。` : null,
+        v.printSize ? `${v.printSize}で使います。${v.printSize === '紙面に小さく配置' ? '小さくても判別できるよう、形を大きくシンプルにしてください。' : ''}` : null,
       ] },
-      { h: '色', items: [colorText] },
-      { h: '文字', items: [text] },
-      { h: '季節・行事', items: [
-        timeItem(v, 'image'),
-        motifItem(v),
-        motifEventItem(v, true),
+      { h: '色と文字', lines: [colorText, text] },
+      { h: '季節・行事', lines: [
+        timeSentence(v, 'image'),
+        motifSentence(v, 'image'),
+        ...eventMotifSentences(v, { all: true }),
       ] },
-      { h: '入れないもの', items: [
-        '余計な文字や装飾、読めない文字',
-        '実在の校章・学校名・ロゴ・商標、既存の作品のキャラクター',
-        '怖い・暴力的・不安をあおる表現',
-        '実在の児童生徒や人物の顔・容姿の再現',
-        v.avoid || null,
-      ] },
-      { h: '制作の条件', items: [
-        '主題をいちばん目立たせ、指定していないモチーフや装飾を増やさないでください。',
-        '特定の作家・作品・キャラクターの画風をまねないでください。',
+      { h: '仕上がりの条件', lines: [
+        '主題をいちばん目立たせ、指定していないモチーフや装飾を増やさないでください。特定の作家・作品・キャラクターの画風はまねないでください。',
         c.std('手や指、物の形に不自然な描写がないようにしてください。'),
-        'この依頼文の説明や指示の文章を、画像の中に文字として入れないでください。',
+      ] },
+      { h: 'してほしくないこと', lines: [
+        ...prohibitions(v, { image: true }),
+        '・怖い・暴力的・不安をあおる表現にしない',
+        v.avoid ? `・${oneLine(v.avoid)}` : null,
       ] },
     ],
     notes: [
@@ -311,48 +326,48 @@ function canvaF08(v, c) {
   const isSlide = v.size && v.size.startsWith('スライド');
   const kind = v.kind || '';
   const isPoster = !isSlide && /掲示|ポスター|めあて/.test(kind);
-  const sizeText = isSlide
-    ? `スライド（${v.size.replace('スライド', '')}）${v.slideCount ? `、${v.slideCount}` : '、枚数は内容に合わせて最小限'}`
-    : (v.size === 'はがき・カードサイズ' ? 'はがき・カードサイズ' : paperDesc(v.size));
-  const use = isSlide ? '教室などで投影して見せる' : (isPoster ? '掲示して、離れた場所から見る' : '印刷して配布する');
   const audience = c.label('audience', v.audience);
+  const who = `${audience}${v.grade ? `（${v.grade}）` : ''}`;
   const mood = v.mood || [];
   const slots = Number(v.imageSlots || 0);
+  const sizeText = isSlide
+    ? `スライド（${v.size.replace('スライド', '')}）${v.slideCount ? `・${v.slideCount}` : '・枚数は内容に合わせて最小限'}`
+    : (v.size === 'はがき・カードサイズ' ? 'はがき・カードサイズ' : `${paperDesc(v.size)}・1ページ`);
+  const use = isSlide
+    ? '教室などで投影して見せます'
+    : (isPoster ? '掲示して、離れた場所から見ます' : '印刷して配布します');
+  const contentLines = String(v.content || '').split('\n').map((x) => x.trim()).filter(Boolean);
 
   return {
-    lead: [
-      isSlide ? `${kind}として使うスライド資料を作成してください。` : `${kind}のデザインを作成してください。`,
-      'レイアウト案の説明ではなく、完成したデザインを作ってください。',
-    ],
+    lead: isSlide
+      ? `${kind}として使う、完成したスライド資料を作ってください。レイアウト案の説明ではなく、そのまま投影できる完成デザインにしてください。`
+      : `${kind}の完成したデザインを作ってください。レイアウト案の説明ではなく、${isPoster ? 'そのまま掲示できる' : 'そのまま印刷して配布できる'}完成デザインにしてください。`,
     sections: [
-      { h: 'サイズ・形式', items: [
-        `サイズ：${sizeText}`,
-        `用途：${use}（見る人：${audience}${v.grade ? `・${v.grade}` : ''}）`,
-        v.mono ? 'モノクロ印刷で読みやすいデザインにしてください（色に頼らず、太字・罫線・囲み・濃淡で区別する）。' : null,
+      { h: 'サイズ・形式', lines: [`${sizeText}です。${use}。見る人は${who}です。`] },
+      { h: 'デザイン', lines: [
+        mood.length ? `雰囲気は「${mood.join('・')}」にしてください。` : null,
+        designStyleSentence(v.designStyle, { mono: v.mono }),
+        v.colors ? `使いたい色は${v.colors}です。${v.mono ? '（モノクロ印刷のため、色ではなく濃淡で表現してください）' : ''}` : null,
+        v.designStyle || mood.includes('色覚の多様性に配慮') ? '色だけで情報を区別せず、読みやすさや色覚の多様性への配慮を、デザインの好みより優先してください。' : null,
+        timeSentence(v),
+        motifSentence(v),
+        ...eventMotifSentences(v),
       ] },
-      { h: '掲載する内容', items: [
-        `次の文言を正確に掲載してください（意味を変えたり省略したりしない）：\n${v.content}`,
-        ...contentEventItems(v),
-        slots > 0 ? `写真・イラストの枠：${slots}か所（あとで差し替えられる空の枠）` : null,
+      { h: '紙面に入れる内容', lines: [
+        '固定で入れる文字（このとおりに入れてください）：',
+        ...contentLines.map((l) => `・${l}`),
+        ...eventContentSentences(v),
+        slots > 0 ? `写真・イラストの枠：${slots}か所。後から差し替えやすい空の枠にしてください。` : null,
+        '日時や場所など、上の文字に書かれていない情報が必要な場合は、記入欄として残してください。',
       ] },
-      { h: 'デザイン', items: [
-        '最も伝えたいことを一番大きく目立たせ、見出しと本文に大きさ・太さのはっきりした差をつけてください。',
+      { h: 'レイアウト', lines: [
+        '最も伝えたいことを一番大きく目立たせ、見出しと本文の大きさ・太さにはっきり差をつけてください。',
         isSlide ? '投影したときに見やすいよう、1枚あたりの文字を少なくし、文字を大きくしてください。' : null,
         isPoster ? '離れた場所からでも読めるよう、見出しはとても大きく、本文も大きめにしてください。' : null,
-        !isSlide && !isPoster ? '印刷して手元で読みやすい文字の大きさ（目安10.5pt以上）にしてください。' : null,
-        mood.length ? `雰囲気：${mood.join('、')}` : null,
-        v.colors ? `使いたい色：${v.colors}${v.mono ? '（モノクロ印刷のため、色ではなく濃淡で表現）' : ''}` : null,
-        designStyleLine(v.designStyle, { mono: v.mono, subject: 'デザイン' }),
-        v.designStyle || mood.includes('色覚の多様性に配慮') ? '色だけで情報を区別しないでください。読みやすさ・色覚の多様性への配慮・モノクロの条件を、デザインの好みより優先してください。' : null,
-        timeItem(v),
-        motifItem(v),
-        motifEventItem(v),
+        !isSlide && !isPoster ? '印刷して手元で読みやすい文字の大きさ（10.5pt以上が目安）にしてください。' : null,
+        '文字・図形・枠は、可能な限り後から個別に編集しやすい形で作ってください。',
       ] },
-      { h: '制作の条件', items: [
-        ...editableRules(),
-        eventRule(v),
-        annualRule(v),
-      ] },
+      { h: 'してほしくないこと', lines: prohibitions(v) },
     ],
     notes: [
       ...COMMON_NOTES,
@@ -366,18 +381,13 @@ export const CANVA_TEMPLATES = { F05: canvaF05, F06: canvaF06, F07: canvaF07, F0
 
 // ---------------------------------------------------------------- テキスト化
 
-function clean(items) {
-  return (items || []).flat(Infinity).filter((x) => x !== null && x !== undefined && x !== false)
+function clean(lines) {
+  return (lines || []).flat(Infinity).filter((x) => x !== null && x !== undefined && x !== false)
     .map((x) => String(x).trim()).filter(Boolean);
 }
 
-function renderItem(it) {
-  const [first, ...rest] = it.split('\n');
-  return [`・${first}`, ...rest.map((r) => (r.startsWith('　') ? r : `　${r}`))].join('\n');
-}
-
 /**
- * Canva AI 向けの依頼文を作る。
+ * Canva 向けの依頼文を作る。
  * @returns {{ok:boolean, errors:Array, text:string, notes:string[], values:object}}
  */
 export function buildCanvaPrompt(task, raw) {
@@ -389,11 +399,9 @@ export function buildCanvaPrompt(task, raw) {
   }
   const out = tpl(values, makeContext(task, values));
   const body = out.sections
-    .map((s) => ({ h: s.h, items: clean(s.items) }))
-    .filter((s) => s.items.length)
-    .map((s) => `■ ${s.h}\n${s.items.map(renderItem).join('\n')}`);
-  const text = [clean(out.lead).join('\n'), ...body].join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+    .map((s) => ({ h: s.h, lines: clean(s.lines) }))
+    .filter((s) => s.lines.length)
+    .map((s) => `■ ${s.h}\n${s.lines.join('\n')}`);
+  const text = [String(out.lead).trim(), ...body].join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
   return { ok: true, errors: [], text, notes: clean(out.notes), values };
 }
-
-export const CANVA_URL = 'https://www.canva.com/';

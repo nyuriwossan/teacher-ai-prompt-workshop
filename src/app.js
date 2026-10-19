@@ -12,7 +12,8 @@ import {
   TASKS, CATEGORIES, POPULAR_TASK_IDS, EXTRA_PANELS, getTask, categoryLabel,
 } from './data/taskCatalog.js';
 import { getDesignStyle } from './data/designStyles.js';
-import { buildCanvaPrompt, isCanvaMode, CANVA_URL } from './prompts/canvaPrompt.js';
+import { buildCanvaPrompt, isCanvaMode, CANVA_URL, CANVA_TIP } from './prompts/canvaPrompt.js';
+import { TARGET_OPTIONS } from './data/taskCatalog.js';
 import { searchTasks, searchGuides } from './data/search.js';
 import {
   buildPrompt, validate, getDefaults, getFields, isVisible, cleanValues, usesReference,
@@ -289,7 +290,13 @@ function renderTask(task) {
   const nextNo = () => String(sectionNo++);
 
   const generateBtn = h('button', { type: 'submit', class: 'btn btn-primary btn-large', id: 'generate' }, '依頼文を作る');
-  const updateGenerateLabel = () => { generateBtn.textContent = modeOf() === 'canva' ? 'Canva AI向けの依頼文を作る' : '依頼文を作る'; };
+  // Canva 向けのヒント（画面表示のみ。依頼文には含めない）
+  const canvaTip = h('p', { class: 'notice notice-info canva-tip', id: 'canva-tip', hidden: true }, CANVA_TIP);
+  const updateGenerateLabel = () => {
+    const canva = modeOf() === 'canva';
+    generateBtn.textContent = canva ? 'Canva向けの依頼文を作る' : '依頼文を作る';
+    canvaTip.hidden = !canva;
+  };
 
   const form = h('form', { class: 'task-form', novalidate: true, id: `form-${task.id}` },
     errorSummary,
@@ -356,9 +363,9 @@ function renderTask(task) {
       // もう一方の出力先の依頼文は表示しない（切り替えると戻る）
       output.hidden = false;
       add(output,
-        h('h2', { class: 'output-title', id: 'output-title', tabindex: '-1' }, isCanva ? '出力先：Canva AI向け' : '出力先：通常のAI向け'),
+        h('h2', { class: 'output-title', id: 'output-title', tabindex: '-1' }, isCanva ? '出力先：Canva向け' : '出力先：共通'),
         h('p', { class: 'notice notice-info', id: 'mode-switch-note' },
-          `${isCanva ? 'Canva AI向け' : '通常のAI向け'}の依頼文はまだ作っていません。「${isCanva ? 'Canva AI向けの依頼文を作る' : '依頼文を作る'}」を押してください。${isCanva ? '通常のAI向け' : 'Canva AI向け'}の依頼文は、出力先を戻すと表示されます。`));
+          `${isCanva ? 'Canva向け' : '共通'}の依頼文はまだ作っていません。「${isCanva ? 'Canva向けの依頼文を作る' : '依頼文を作る'}」を押してください。${isCanva ? '共通' : 'Canva向け'}の依頼文は、出力先を戻すと表示されます。`));
       return;
     }
     output.hidden = false;
@@ -368,7 +375,7 @@ function renderTask(task) {
 
     const area = h('textarea', {
       id: 'prompt-output', class: 'input textarea prompt-output', rows: '14', spellcheck: 'false',
-      'aria-label': isCanva ? '生成したCanva AI向けの依頼文（編集できます）' : '生成した依頼文（編集できます）', 'aria-describedby': 'output-help',
+      'aria-label': isCanva ? '生成したCanva向けの依頼文（編集できます）' : '生成した依頼文（編集できます）', 'aria-describedby': 'output-help',
       dataset: { mode },
     });
     area.value = out.text;
@@ -403,8 +410,13 @@ function renderTask(task) {
     }, 'Canvaを開く');
 
     add(output,
-      h('h2', { class: 'output-title', id: 'output-title', tabindex: '-1' }, isCanva ? 'Canva AIへの依頼文ができました' : 'AIへの依頼文ができました'),
+      h('h2', { class: 'output-title', id: 'output-title', tabindex: '-1' }, isCanva ? 'Canva向けの依頼文ができました' : 'AIへの依頼文ができました'),
       isCanva ? h('p', { class: 'canva-howto', id: 'canva-howto' }, '依頼文をコピーして、Canva AIの入力欄に貼り付けてください。生成されたデザインは必要に応じて修正してください。') : null,
+      isCanva ? h('p', { class: 'hint canva-tip-out' }, CANVA_TIP) : null,
+      !isCanva && ['chatgpt', 'gemini', 'claude'].includes(cleaned.target)
+        ? h('p', { class: 'hint target-note', id: 'target-note' },
+          `出力先：${TARGET_OPTIONS.find((o) => o.value === cleaned.target).label}。現時点では共通と同じ依頼文です（どのAIにもそのまま使えます）。`)
+        : null,
       scan.found
         ? h('div', { class: 'notice notice-warn', role: 'status', id: 'pii-warning' },
           h('p', { class: 'notice-title' }, '個人情報などが含まれている可能性があります'),
@@ -471,6 +483,8 @@ function renderTask(task) {
     output,
   );
 
+  const targetEl = fieldEls.get('target');
+  if (targetEl) targetEl.after(canvaTip);
   updatePanelSummaries();
   updateGenerateLabel();
   drawOutput(false);
