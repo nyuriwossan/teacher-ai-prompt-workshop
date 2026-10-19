@@ -1,0 +1,14 @@
+{
+  "name": "teacher-ai-prompt-workshop",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "先生のAI依頼文工房：困りごとを選んで、AIへの依頼文をコピーするだけの静的Webツール",
+  "scripts": {
+    "test": "node --test tests/unit/*.test.js",
+    "test:e2e": "node tests/e2e/run-e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
+  }
+}
