@@ -81,7 +81,8 @@ F05〜F08の「出力の設定」に「依頼文の出力先」（通常のAI向
 ```
 index.html               画面（CSPで外部通信を禁止）
 assets/styles.css        スタイル（外部フォントなし）
-assets/icon.svg, icon-180.png
+icons/                   ホーム画面用アイコン（scripts/make_icons.py で生成）
+manifest.webmanifest     ホーム画面に追加したときの名前とアイコン
 src/app.js               画面の組み立て・ルーティング（#/、#/f/F01、#/about）
 src/data/formOptions.js  校種・学年（校種で学年が変わる）、出力条件などの共通選択肢
 src/data/taskCatalog.js  16フォームの定義（項目・表示条件・安全の別軸・検索語）
